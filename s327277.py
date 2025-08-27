@@ -184,15 +184,12 @@ def f1(x: np.ndarray) -> np.ndarray:
 def f2(x: np.ndarray) -> np.ndarray:
     #return safe_div(leaky_relu(leaky_relu(average(min_op(add(min_op(add(add(add(x[1], x[0]), x[0]), min_op(add(cube(safe_pow(safe_log(max_op(sub(1.47295, x[0]), 4.85972)), logit(triangle_wave(x[0])))), x[2]), min_op(max_op(add(triangle_wave(x[0]), x[2]), safe_pow(4.77956, -0.711423)), custom_exp(logit(safe_pow(logit(safe_pow(1.79359, elu(4.33868, mod(x[1], 3.65731)))), safe_pow(1.79359, elu(4.33868, mod(x[1], 3.65731))))))))), min_op(add(cube(x[0]), x[2]), min_op(max_op(leaky_relu(gaussian(4.61924), sub(x[1], triangle_wave(-2.89579))), 4.85972), 3.85772))), min_op(add(add(x[1], x[0]), x[2]), min_op(add(x[1], x[0]), sub(x[1], -3.998)))), cube(relu(safe_log(mul(4.65932, square_wave(safe_pow(triangle_wave(x[0]), relu(sinc(sub(1.47295, x[0])))))))))), 4.65932), relu(safe_log(sub(logit(elu(x[1], 2.39479)), add(add(add(x[1], x[0]), x[0]), min_op(add(cube(safe_pow(safe_log(max_op(sub(1.47295, x[0]), 4.85972)), logit(triangle_wave(x[0])))), x[2]), min_op(max_op(logit(x[2]), safe_pow(4.77956, -0.711423)), custom_exp(logit(safe_pow(logit(safe_pow(1.79359, elu(cube(x[0]), mod(x[1], 3.65731)))), safe_pow(1.79359, elu(4.33868, mod(x[1], 3.65731))))))))))))), relu(sinc(leaky_relu(x[0], 0.831663)))), mul(bent_identity(leaky_relu(gaussian(4.61924), sub(logit(elu(x[1], 2.39479)), triangle_wave(-2.89579)))), sub(triangle_wave(safe_pow(x[1], -4.23848)), leaky_relu(logit(elu(x[1], sinc(sub(1.47295, x[0])))), sub(logit(elu(x[1], 2.39479)), add(add(add(x[1], x[0]), x[0]), min_op(add(cube(safe_pow(safe_log(max_op(sub(1.47295, x[0]), 4.85972)), logit(triangle_wave(x[0])))), x[2]), min_op(max_op(logit(x[2]), safe_pow(4.77956, -0.711423)), custom_exp(logit(triangle_wave(x[0])))))))))))
     #1.10812e+13
-    #portarlo a 12 o 11
     #running
     return safe_div(mul(sinc(average(average(x[1], x[2]), x[0])), add(x[1], add(add(x[0], x[0]), add(add(average(-0.432716, add(average(average(average(sinc(relu(4.27964)), x[2]), add(sinc(custom_exp(x[1])), add(x[0], x[2]))), add(sinc(custom_exp(x[1])), add(x[0], x[2]))), add(x[0], x[2]))), x[2]), add(x[1], x[0]))))), relu(-0.0525263))
     #1.0057e+10
 
 def f3(x: np.ndarray) -> np.ndarray:
     #return add(sub(square(mul(-1.12306, x[0])), cube(x[1])), square(min_op(add(safe_sqrt(x[2]), min_op(-1.95848, x[0])), min_op(min_op(x[2], add(x[2], min_op(add(safe_sqrt(x[2]), min_op(-1.95848, x[0])), sub(safe_sqrt(x[2]), x[0])))), sub(safe_sqrt(x[2]), x[0])))))
-    #22.518
-    #portarlo a 0.4 o -29
     #running
     return sub(add(safe_pow(x[0], 2.43372), swish(add(add(sub(safe_pow(custom_sin(2.43372), -1.63332), custom_tanh(x[2])), triangle_wave(x[0])), triangle_wave(x[0])))), add(add(safe_div(x[2], 4.74487), add(add(add(add(cube(x[1]), x[2]), x[2]), x[2]), -3.41421)), triangle_wave(safe_pow(cube(-4.64482), hard_sigmoid(-3.54927)))))
     #0.248057
@@ -202,7 +199,6 @@ def f4(x: np.ndarray) -> np.ndarray:
     #return mul(min_op(min_op(sinc(bent_identity(sub(0.350701, x[1]))), sinc(sub(bent_identity(sub(sinc(sub(leaky_relu(-4.0982, custom_sin(-1.35271)), x[1])), add(x[1], custom_exp(average(min_op(safe_sqrt(3.45691), x[0]), min_op(-4.97996, 2.09419)))))), elu(x[1], x[1])))), sinc(relu(max_op(max_op(bent_identity(min_op(sub(bent_identity(4.65932), elu(x[1], 0.350701)), x[1])), safe_log(-4.0982)), bent_identity(min_op(sub(leaky_relu(max_op(-1.91383, x[1]), custom_sin(elu(safe_div(x[1], average(x[1], 3.65731)), 2.05411))), x[1]), relu(max_op(max_op(sinc(-1.35271), safe_log(-4.0982)), min_op(softsign(x[0]), max_op(average(3.37675, x[0]), x[0])))))))))), bent_identity(bent_identity(bent_identity(4.65932))))
     #return sub(safe_sqrt(safe_pow(sub(4.46473, mul(custom_cos(x[1]), add(sub(sub(2.38869, sigmoid(x[0])), 1.18809), -4.46973))), safe_sqrt(safe_sqrt(sub(sub(custom_cos(x[1]), mul(sigmoid(safe_pow(-0.717859, x[0])), -4.46973)), mul(sigmoid(safe_pow(0.612806, x[0])), -4.53977)))))), mul(custom_cos(x[1]), -4.53977))
     #0.00602405 
-    # portarlo a -5
     #running
     return add(mul(4.46473, custom_cos(x[1])), safe_sqrt(sub(4.46473, sub(sub(custom_exp(sub(custom_cos(x[1]), -2.64882)), mul(add(custom_cos(cube(2.06853)), sub(sub(custom_cos(x[1]), -2.64882), safe_sqrt(mul(4.46473, custom_cos(x[1]))))), custom_cos(sub(custom_cos(x[1]), -2.64882)))), mul(mul(custom_sin(mul(-0.0575288, add(mul(custom_exp(sub(custom_cos(x[1]), -2.64882)), -0.947974), sub(-2.64882, -2.64882)))), x[0]), custom_cos(custom_cos(custom_cos(sub(custom_cos(x[1]), -2.64882)))))))))
     #0.00445512
@@ -220,7 +216,6 @@ def f5(x: np.ndarray) -> np.ndarray:
 def f6(x: np.ndarray) -> np.ndarray:
     #return add(sub(x[1], x[0]), average(mul(safe_pow(-2.63527, gaussian(2.51503)), x[1]), average(average(x[1], average(x[1], x[0])), x[0])))
     #0.000744758
-    #portarlo a -7 o -24
     #running
     return add(x[1], average(average(average(sub(x[1], x[0]), average(x[1], sub(mod(mul(sub(x[1], x[0]), mul(-3.17909, triangle_wave(-2.0035))), sub(x[1], x[0])), x[0]))), mod(x[1], gaussian(-1.87344))), sub(x[1], x[0])))
     #1.13731e-05
@@ -236,5 +231,4 @@ def f8(x: np.ndarray) -> np.ndarray:
     
     return mul(sub(sub(sub(sub(sub(average(safe_pow(leaky_relu(logit(triangle_wave(-0.270541)), safe_sqrt(4.01804)), safe_sqrt(x[5])), leaky_relu(logit(triangle_wave(safe_sqrt(x[5]))), x[5])), logit(safe_sqrt(average(sub(sub(sub(triangle_wave(safe_sqrt(x[5])), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(safe_sqrt(average(average(x[3], 4.01804), logit(safe_sqrt(x[5])))))), logit(x[5])), logit(sub(average(safe_pow(x[5], safe_sqrt(x[5])), leaky_relu(logit(max_op(x[1], 1.25251)), x[5])), logit(safe_sqrt(average(x[3], 4.01804))))))))), logit(safe_sqrt(average(sub(sub(logit(triangle_wave(safe_sqrt(x[5]))), logit(safe_sqrt(average(x[3], average(x[3], logit(triangle_wave(-0.270541))))))), logit(x[5])), logit(safe_sqrt(logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5]))))))))))), logit(x[5])), logit(safe_sqrt(average(sub(sub(sub(triangle_wave(-0.270541), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(x[5])), logit(sub(average(safe_pow(x[5], safe_sqrt(x[5])), leaky_relu(logit(triangle_wave(safe_sqrt(x[5]))), x[5])), logit(safe_sqrt(average(x[3], 4.01804))))))))), logit(x[5])), mul(3.73747, x[5]))
     #535857
-    #portarlo a 166000 o 20000
     #running
