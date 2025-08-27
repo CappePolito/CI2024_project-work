@@ -9,6 +9,7 @@ from typing import Collection
 from .node import Node
 from .random import gxgp_random
 from .utils import arity
+import numpy as np
 
 __all__ = ['DagGP']
 
@@ -40,7 +41,7 @@ class DagGP:
         return f'x{i}'
 
     @staticmethod
-    def evaluate(individual: Node, X, variable_names=None):
+    def evaluate2(individual: Node, X, variable_names=None):
         if variable_names:
             names = variable_names
         else:
@@ -50,6 +51,11 @@ class DagGP:
         for row in X:
             y_pred.append(individual(**{n: v for n, v in zip(names, row)}))
         return y_pred
+    
+    import numpy as np
+
+
+
 
     @staticmethod
     def plot_evaluate(individual: Node, X, variable_names=None):

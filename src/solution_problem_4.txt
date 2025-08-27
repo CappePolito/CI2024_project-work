@@ -1,0 +1,6 @@
+Best formula: sub(safe_sqrt(safe_pow(sub(4.46473, mul(custom_cos(x1), add(sub(sub(2.38869, sigmoid(x0)), 1.18809), -4.46973))), safe_sqrt(safe_sqrt(sub(sub(custom_cos(x1), mul(sigmoid(safe_pow(-0.717859, x0)), -4.46973)), mul(sigmoid(safe_pow(0.612806, x0)), -4.53977)))))), mul(custom_cos(x1), -4.53977))
+MSE (train): 0.605159
+MSE (validation): 0.591473
+Complexity (nodes): 38
+Final fitness: -0.006140797610322006
+Found sub(safe_sqrt(safe_pow(sub(sub(custom_cos(custom_sin(x0)), safe_pow(custom_cos(x1), -4.68484)), safe_pow(safe_div(x1, 4.41471), -3.43922)), sigmoid(custom_cos(x1)))), mul(custom_cos(x1), -4.6048)) at generation 21

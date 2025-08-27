@@ -1327,7 +1327,7 @@ This section of code selects a problem dataset, loads the input–output arrays,
 This section selects the problem dataset, loads the raw inputs and targets, applies subsampling if the number of samples exceeds a threshold, and reshapes the input matrix.
 
 ```python
-"""# -------------------------------
+# -------------------------------
 # Load problem data
 # -------------------------------
 selected_problem = 8
@@ -1335,7 +1335,7 @@ data = np.load(f'../data/problem_{selected_problem}.npz')
 x_data = data['x']
 y_data = data['y']
 
-MAX_SAMPLES = 2000
+MAX_SAMPLES = 1000000000
 if y_data.shape[0] > MAX_SAMPLES:
     step = y_data.shape[0] // MAX_SAMPLES
     y_true = y_data[::step][:MAX_SAMPLES]
@@ -1344,36 +1344,14 @@ else:
     y_true = y_data
 
 # Transpose x_data so that each row is one sample and each column is one variable.
-x_data = x_data.T  """
+x_data = x_data.T  
 
-
-# -------------------------------
-# Load problem data
-# -------------------------------
-selected_problem = 8
-data = np.load(f'../data/problem_{selected_problem}.npz')
-x_data = data['x']
-y_data = data['y']
-
-MAX_SAMPLES = 2000
-num_samples = y_data.shape[0]
-
-if num_samples > MAX_SAMPLES:
-    indices = np.random.choice(num_samples, size=MAX_SAMPLES, replace=False)
-else:
-    indices = np.arange(num_samples)
-
-indices = np.sort(indices)
-
-y_true = y_data[indices]
-x_data = x_data[:, indices]
-
-x_data = x_data.T
 
 
 ```
 
-I used MAX_SAMPLES to limit the number of samples when testing new algorithms around 2000, and increased it to 5000 when running the whole program to avoid excessive computational times
+I used MAX_SAMPLES to limit the number of samples when testing new algorithms around 2000, and increased it to 5000 when running the whole program to avoid excessive computational times.
+For the september exam i ran it with a higher number (1000000000) to avoid not reaching the optimal solution due just to a lack of data points.
 
 
 
@@ -1424,18 +1402,18 @@ operators = [
 ]
 
 # Adjusted parameter settings to allow for more growth and complexity
-POP_SIZE = 5000          
-NUM_GENS = 100         
-OFFSPRING_NUM = 1500      
-INITIAL_SIZE_MIN = 1    
-INITIAL_SIZE_MAX = 30   
-TOURN_SIZE = 250        
-LENGTH_PENALTY = 0.00001 
+POP_SIZE = 4000          
+NUM_GENS = 500         
+OFFSPRING_NUM = 1200      
+INITIAL_SIZE_MIN = 1    # Minimum size for initial trees
+INITIAL_SIZE_MAX = 15   # Maximum size for initial trees 
+TOURN_SIZE = 9        
+LENGTH_PENALTY = 0
 CROSSOVER_PROB = 0.7    
 MUTATION_PROB = 0.3     
-MAX_TREE_DEPTH = 10     
+MAX_TREE_DEPTH = 15     
 ADAPTIVE_PENALTY = True 
-MIN_SEMANTIC_THRESHOLD = 0.05 
+MIN_SEMANTIC_THRESHOLD = 0.01  
 
 # -------------------------------
 # Initialize the GP system with consistent operators
@@ -1461,40 +1439,58 @@ This is where i set the parameters for the code
 # Tree Structure Functions
 # -------------------------------
 
-def has_cycle(node, visited=None):
-    """Check if a tree has cycles, which should be avoided in GP."""
-    if visited is None:
-        visited = set()
-    if id(node) in visited:
-        return True
-    visited.add(id(node))
-    for child in node.successors:
-        if has_cycle(child, visited.copy()):
-            return True
-    return False
+# -------------------------------
+# Tree Structure Functions
+# -------------------------------
+def get_operator_arity(op):
+    """Determine the arity of an operator based on its function signature."""
+    import inspect
+    
+    # Handle built-in operators
+    if op in [operator.add, operator.sub, operator.mul]:
+        return 2
+    
+    # For custom functions, check the number of parameters
+    try:
+        sig = inspect.signature(op)
+        params = [p for p in sig.parameters.values() 
+                 if p.default == p.empty and p.name not in ['alpha']]  # Exclude optional params
+        return len(params)
+    except:
+        # If inspection fails, assume unary
+        return 1
+
+# Create dictionaries for quick lookup
+unary_operators = [
+    square, cube, custom_sin, custom_cos, custom_exp, safe_log, safe_sqrt,
+    """custom_tanh, reciprocal, sigmoid, gaussian, relu, leaky_relu, elu,
+    swish, mish, sin1_over_x, sinc, sawtooth, triangle_wave, square_wave,
+    bent_identity, softsign, hard_sigmoid, logit"""
+]
+
+binary_operators = [
+    operator.add, operator.sub, operator.mul, safe_div, safe_pow,
+    """mod, max_op, min_op, average"""
+]
 
 
-def validate_and_fix_tree(root):
-    """If a tree has cycles, replace it with a valid one."""
-    if has_cycle(root):
-        new_size = np.random.randint(INITIAL_SIZE_MIN, INITIAL_SIZE_MAX + 1)
-        return gp.create_individual(new_size)
-    return root
-
-
+#used done
 def collect_nodes(node, nodes_list=None):
     """Collect all nodes in a tree into a list."""
     if nodes_list is None:
         nodes_list = []
     nodes_list.append(node)
+    # Use public API for successors.
     for child in node.successors:
         collect_nodes(child, nodes_list)
     return nodes_list
 
+#used done
 def get_tree_depth(node, depth=0, max_depth=0):
     """Calculate the maximum depth of a tree."""
     current_depth = depth + 1
     max_depth = max(max_depth, current_depth)
+    # Use public API for successors.
     for child in node.successors:
         max_depth = get_tree_depth(child, current_depth, max_depth)
     return max_depth
@@ -1504,30 +1500,31 @@ def get_tree_depth(node, depth=0, max_depth=0):
 
 ## Tree Structure Functions
 
-- **`has_cycle(node, visited=None)`**  
-  Recursively checks whether the tree rooted at `node` contains a cycle.  
-  - Uses a `visited` set of node IDs to detect repeats.  
-  - Returns `True` as soon as a previously seen node ID is encountered.  
-  - Traverses all `node.successors`.
+- **`get_operator_arity(op)`**  
+  Determine the number of operands `op` expects (used when building/mutating trees).  
+  - Returns an integer arity used to choose/validate operator replacements.  
+  - Prefers explicit checks for common binary ops, falls back to callable signature inspection, and returns `1` if unknown.  
+  - Used by the tree constructor and mutation operators to enforce arity constraints.
 
-- **`validate_and_fix_tree(root)`**  
-  Ensures the given tree has no cycles.  
-  - Calls `has_cycle(root)`.  
-  - If a cycle is found, generates and returns a fresh individual of random size between `INITIAL_SIZE_MIN` and `INITIAL_SIZE_MAX` via `gp.create_individual()`.  
-  - Otherwise, returns the original `root`.
+- **`unary_operators` / `binary_operators`**  
+  Lookup lists of available operators used during initialization and mutation.  
+  - Contain actual callable objects (with placeholder names as strings for pending additions).  
+  - Used for sampling operators, validating node replacements, and reporting available primitives.
 
 - **`collect_nodes(node, nodes_list=None)`**  
-  Gathers every node in the tree into a flat Python list.  
-  - Initializes `nodes_list` if not provided.  
-  - Appends the current `node`, then recurses over each child in `node.successors`.  
-  - Returns the completed list of nodes.
+  Gather every node from the subtree rooted at `node` into a flat Python list.  
+  - Performs a depth-first, pre-order traversal and returns the accumulator list.  
+  - Used to pick random mutation targets, compute tree statistics, and serialize trees.  
+  - Note: recursive; very deep trees may hit the recursion limit (iterative alternative can be used if needed).
 
 - **`get_tree_depth(node, depth=0, max_depth=0)`**  
-  Computes the maximum depth (height) of the tree.  
-  - `depth` tracks the current traversal depth; `max_depth` accumulates the deepest level found.  
-  - At each node, increments `depth` by 1 and updates `max_depth`.  
-  - Recurses over all `node.successors`, propagating and updating the maximum depth.  
-  - Returns the overall maximum depth.  
+  Compute the maximum depth (height) of the tree rooted at `node` (root counted as depth 1).  
+  - Recursively tracks the current depth and propagates the maximum across successors.  
+  - Used to enforce maximum-depth constraints and for diagnostics/performance checks.  
+  - Note: recursion-based; consider an iterative BFS/stack approach for extremely deep trees.
+
+---
+
 
 
 ---
@@ -1539,40 +1536,74 @@ def get_tree_depth(node, depth=0, max_depth=0):
 # -------------------------------
 # Define an improved fitness evaluation function with adaptive complexity penalty
 # -------------------------------
-def unified_compute_fitness(ind, generation=0, adaptive=True):
+def unified_compute_fitness(ind, generation=0, pop_stats=None):
     
-    ind = validate_and_fix_tree(ind)
-
     try:
-        pred = gp.evaluate(ind, x_data, variable_names=[f'x{i}' for i in range(x_data.shape[1])])
+        pred = gp.evaluate2(ind, x_data, variable_names=[f'x{i}' for i in range(x_data.shape[1])])
         pred = np.array(pred)
 
         if np.any(np.isnan(pred)) or np.any(np.isinf(pred)):
-            return -1e30  # Extremely bad fitness
+            return -1e30
 
         mse_val = np.mean((pred - y_true) ** 2)
-
         complexity = len(collect_nodes(ind))
-
-        #base_penalty = 0.001
-        penalty_weight = LENGTH_PENALTY * max(0.1, 1.0 - generation / NUM_GENS)
-
-        total_penalty = penalty_weight * complexity
-
-        fitness = -(mse_val + total_penalty)
+        
+        # Base fitness is negative MSE
+        fitness = -mse_val
+        
+        if pop_stats:
+            best_mse = pop_stats.get('best_mse', 1.0)
+            avg_mse = pop_stats.get('avg_mse', 1.0)
+            avg_size = pop_stats.get('avg_size', 20)
+            
+            # Dynamic penalty based on population state
+            if mse_val < avg_mse:  # Better than average
+                # Scale penalty based on how much better than average
+                improvement_ratio = (avg_mse - mse_val) / avg_mse
+                
+                # Less penalty for better improvements
+                penalty_scale = max(0.0001, 0.01 * (1 - improvement_ratio))
+                
+                # Only penalize if significantly larger than average
+                if complexity > avg_size * 1.5:
+                    size_penalty = penalty_scale * (complexity - avg_size) / avg_size
+                    fitness -= size_penalty
+                    
+            # Special handling for near-optimal solutions
+            if mse_val < best_mse * 1.1:  # Within 10% of best
+                # Prefer simpler solutions when MSE is similar
+                fitness -= 0.0001 * complexity / avg_size
+        
+        # Generation-based adjustments
+        evolution_progress = generation / NUM_GENS
+        
+        # Early generations: encourage diversity
+        if evolution_progress < 0.3:
+            # Small bonus for unusual sizes (exploration)
+            size_deviation = abs(complexity - 20) / 20
+            fitness += 0.00001 * size_deviation
+            
+        # Late generations: focus on refinement
+        elif evolution_progress > 0.7:
+            # Bonus for very low MSE
+            if mse_val < 0.001:
+                fitness += 0.1 * (0.001 - mse_val)
+                
         return fitness
 
     except Exception as e:
-        print(f"Fitness evaluation failed: {e}")
         return -1e30
 
 
 
 
+#used done
 def semantic_distance(ind1, ind2, x_data):
-    y1 = np.array(gp.evaluate(ind1, x_data))
-    y2 = np.array(gp.evaluate(ind2, x_data))
+    # Evaluate both individuals on a sample of x_data and return an appropriate distance measure.
+    y1 = np.array(gp.evaluate2(ind1, x_data))
+    y2 = np.array(gp.evaluate2(ind2, x_data))
     return np.mean(np.abs(y1 - y2))
+
 
 
 
@@ -1581,27 +1612,24 @@ def semantic_distance(ind1, ind2, x_data):
 
 ## Fitness & Semantic Functions
 
-- **`unified_compute_fitness(ind, generation=0, adaptive=True)`**  
-  1. **Cycle Check**: Calls `validate_and_fix_tree` to ensure `ind` has no cycles.  
-  2. **Prediction**:  
-     - Uses `gp.evaluate` on `x_data` with variable names `['x0', 'x1', …]`.  
-     - Converts output to NumPy array, checks for `NaN`/`Inf` and returns a very low fitness (−1e30) if invalid.  
-  3. **MSE Calculation**:  
-     - Computes `mse_val = mean((pred − y_true)²)`.  
-  4. **Complexity Penalty**:  
-     - Counts nodes via `len(collect_nodes(ind))`.  
-     - Sets `penalty_weight = LENGTH_PENALTY * max(0.1, 1 − generation/NUM_GENS)`, causing the per-node cost to decay over generations but never drop below 10% of its original.  
-     - `total_penalty = penalty_weight * complexity`.  
-  5. **Fitness Score**:  
-     - Returns `-(mse_val + total_penalty)`, so higher (less negative) is better.  
-  6. **Error Handling**:  
-     - Catches exceptions during evaluation, logs the error, and returns −1e30.
+-## Fitness & Semantic Functions
+
+- **`unified_compute_fitness(ind, generation=0, pop_stats=None)`**  
+  Compute a single scalar fitness combining prediction quality and an adaptive complexity penalty.  
+  - Base metric: negative MSE (`-mse`) from `gp.evaluate2(ind, x_data, ...)` — higher is better (less negative = lower error).  
+  - Robustness: returns a large negative constant (`-1e30`) if evaluation yields `NaN`/`Inf` or an exception occurs.  
+  - Adaptive complexity penalty: when `pop_stats` is provided (`best_mse`, `avg_mse`, `avg_size`) the function applies small, dynamic penalties for overly large trees — penalties scale down for individuals that improve on population averages and add a small simplicity bias for near-best solutions.  
+  - Generation-aware tweaks: early generations (< 30% of `NUM_GENS`) get a tiny exploration bonus for unusual sizes; late generations (> 70%) favour refinement (bonus for very low MSE).  
+  - Uses: fitness-based selection, complexity control during evolution, and automatic trade-off between accuracy and parsimony.  
+  - I/O / complexity: inputs are `ind`, `generation`, optional `pop_stats`; output is a float fitness. Dominant cost is model evaluation `O(S)` for `S = len(x_data)` plus `O(n)` to compute tree size via `collect_nodes`.
 
 - **`semantic_distance(ind1, ind2, x_data)`**  
-  1. **Evaluate Individuals**:  
-     - Computes `y1 = gp.evaluate(ind1, x_data)` and `y2 = gp.evaluate(ind2, x_data)` as NumPy arrays.  
-  2. **Distance Metric**:  
-     - Returns `mean(abs(y1 − y2))`, measuring the average absolute difference between their predictions.
+  Measure behavioral (semantic) difference between two individuals.  
+  - Implementation: evaluate both individuals on `x_data` and return the mean absolute error between outputs.  
+  - Uses: diversity measures, niching, clustering or replacement rules based on behavioural similarity.  
+  - I/O / complexity: inputs are two individuals and `x_data`; output is a scalar distance. Complexity is `O(S)` where `S` is number of samples in `x_data`.  
+  - Caveat: cost scales with `x_data` size — consider subsampling `x_data` for frequent distance checks.
+
 
 
 
@@ -1609,38 +1637,47 @@ def semantic_distance(ind1, ind2, x_data):
 
 
 ```python
-
 # -------------------------------
 # Helper functions for mutation and crossover
 # -------------------------------
-def get_mutation_strategies(current_size, growth_factor):
+#usded done
+def get_mutation_strategies(current_size, generation, num_gens):
     """Determine mutation strategies and their probabilities based on tree size."""
-    if current_size < 15:  # For smaller trees, encourage growth more aggressively
-        strategies = [
-            ("point_mutation", max(0.1, 0.35 - growth_factor * 0.2)),
-            ("subtree_replacement", max(0.1, 0.35 - growth_factor * 0.2)),
-            ("grow", min(0.7, 0.2 + growth_factor * 0.4)),  # Increase growth probability
-            ("shrink", max(0.05, 0.1 - growth_factor * 0.05))
-        ]
-    else:  # For larger trees, balanced approach
-        strategies = [
-            ("point_mutation", 0.25),
-            ("subtree_replacement", 0.25),
-            ("grow", 0.4),  # Still significant growth probability
-            ("shrink", 0.1)
-        ]
+    evolution_progress = generation / num_gens
     
-    # Normalize probabilities to ensure they sum to 1.0
+    # Base probabilities that change with evolution
+    point_mut_prob = 0.3
+    subtree_prob = 0.2
+    
+    if current_size < 15:
+        # Small trees: more aggressive growth early on
+        grow_prob = 0.4 * (1 - evolution_progress)
+        shrink_prob = 0.1 + 0.3 * evolution_progress
+    else:
+        # Large trees: also adapt over time
+        grow_prob = 0.3 * (1 - evolution_progress)  # Less growth than small trees
+        shrink_prob = 0.2 + 0.3 * evolution_progress  # More shrinking
+        
+    strategies = [
+        ("point_mutation", point_mut_prob),
+        ("subtree_replacement", subtree_prob),
+        ("grow", grow_prob),
+        ("shrink", shrink_prob)
+    ]
+    
+    # Normalize probabilities
     total_prob = sum(prob for _, prob in strategies)
     return [(name, prob/total_prob) for name, prob in strategies]
 
 
+#used done
 def select_mutation_strategy(strategies):
     """Select a mutation strategy based on probabilities."""
     strategy_names, probabilities = zip(*strategies)
     return np.random.choice(strategy_names, p=probabilities)
 
 
+#used done
 def select_node_for_mutation(all_nodes, mutation_type):
     """Select a node to mutate with bias toward leaf nodes for growth operations."""
     if mutation_type == "grow" and len(all_nodes) > 1:
@@ -1651,8 +1688,20 @@ def select_node_for_mutation(all_nodes, mutation_type):
     
     return np.random.choice(all_nodes)
 
+#used done
 def replace_subtree(node, new_subtree, parent=None, parent_idx=None):
-
+    """
+    Replace a node's subtree with a new subtree, respecting arity constraints.
+    
+    Parameters:
+    - node: The node to replace
+    - new_subtree: The new subtree to use
+    - parent: The parent node (if known)
+    - parent_idx: The index of node in parent's successors (if known)
+    
+    Returns:
+    - True if replacement was successful, False otherwise
+    """
     # If we have direct parent access, we can replace the entire node
     if parent is not None and parent_idx is not None:
         parent_successors = list(parent.successors)
@@ -1665,6 +1714,7 @@ def replace_subtree(node, new_subtree, parent=None, parent_idx=None):
     
     # If node and new_subtree have the same number of successors, we can replace content
     if len(node.successors) == len(new_subtree.successors):
+        # Copy operator and data
         if hasattr(node, '_op') and hasattr(new_subtree, '_op'):
             node._op = new_subtree._op
         
@@ -1674,6 +1724,7 @@ def replace_subtree(node, new_subtree, parent=None, parent_idx=None):
         if hasattr(node, 'name') and hasattr(new_subtree, 'name'):
             node.name = new_subtree.name
         
+        # Copy successors one by one
         for i, successor in enumerate(new_subtree.successors):
             node_successors = list(node.successors)
             node_successors[i] = successor
@@ -1683,7 +1734,9 @@ def replace_subtree(node, new_subtree, parent=None, parent_idx=None):
     
     return False
 
+#used done
 def find_parent_and_index(root, node, path=None):
+    """Find the parent of a node and its index in the parent's successors."""
     if path is None:
         path = []
     
@@ -1692,6 +1745,7 @@ def find_parent_and_index(root, node, path=None):
         if child is node:
             return root, i
     
+    # Recursively check all children
     for i, child in enumerate(root.successors):
         result = find_parent_and_index(child, node, path + [(root, i)])
         if result is not None:
@@ -1699,33 +1753,99 @@ def find_parent_and_index(root, node, path=None):
     
     return None
 
+#used done
 def apply_point_mutation(ind, node, gp_instance, current_depth, max_depth):
+    """Apply point mutation to a node - change only the operator or terminal value."""
     if not node.is_leaf:
-        new_op = np.random.choice(operators)
-        # Create a small new subtree if there is room
-        if current_depth < max_depth:
-            # Generate a subtree with potentially more complex structure
-            depth_allowance = max_depth - current_depth + 1
-            max_new_depth = min(3, depth_allowance)
-            new_subtree = gp_instance.create_individual(np.random.randint(2, max_new_depth + 1))
-            replace_subtree(node, new_subtree)
+        # For internal nodes, change the operator to another with same arity
+        current_arity = len(node.successors)
+        
+        if current_arity == 1:
+            compatible_ops = unary_operators
+        elif current_arity == 2:
+            compatible_ops = binary_operators
+        else:
+            return ind
+        
+        # Select a new operator (different from current if possible)
+        if hasattr(node, '_op') and node._op in compatible_ops and len(compatible_ops) > 1:
+            # Try to select a different operator
+            available_ops = [op for op in compatible_ops if op != node._op]
+            if available_ops:
+                new_op = np.random.choice(available_ops)
+            else:
+                new_op = np.random.choice(compatible_ops)
+        else:
+            new_op = np.random.choice(compatible_ops)
+        
+        # Update the operator
+        if hasattr(node, '_op'):
+            node._op = new_op
+        if hasattr(node, 'name'):
+            # Update the name to match the new operator
+            node.name = new_op.__name__ if hasattr(new_op, '__name__') else str(new_op)
+            
+    else:
+        # For leaf nodes (terminals), modify the value
+        if hasattr(node, '_data'):
+            data = node._data 
+            if isinstance(data, str) and data.startswith('x'):
+                current_var_num = int(data[1:]) if len(data) > 1 else 0
+                
+                # Change to a different variable with 50% probability
+                if np.random.rand() < 0.5:
+                    num_variables = 5  
+                    new_var_num = np.random.choice([i for i in range(num_variables) if i != current_var_num])
+                    node._data = f'x{new_var_num}'
+            else:
+                
+                try:
+                    current_val = float(data)
+                    # Add Gaussian noise
+                    perturbation = np.random.normal(0, 0.1 * abs(current_val) + 0.1)
+                    new_val = current_val + perturbation
+                    node._data = str(new_val)
+                except:
+                    # If conversion fails, leave it unchanged
+                    pass
+    
     return ind
 
 
+#used done
 def apply_subtree_replacement(ind, node, gp_instance, generation, current_depth, max_depth):
+    """Replace node with a new subtree, respecting arity constraints."""
     if current_depth >= max_depth:
         return ind
-        
+    
+    # Find parent and index
     parent_info = find_parent_and_index(ind, node)
     
-    # Create a new subtree
-    base_size = 3 + int((generation / NUM_GENS) * 5)
-    size_range = max(2, base_size + np.random.randint(0, 3))
-    new_size = np.random.randint(2, size_range + 1)
+    # Calculate new subtree size based on evolution progress
+    evolution_progress = generation / NUM_GENS
+    
+    # Start small, grow larger as evolution progresses
+    min_size = 2
+    max_size = 3 + int(evolution_progress * 5)  # Grows from 3 to 8
+    new_size = np.random.randint(min_size, max_size + 1)
+    
+    # Ensure we don't create too deep trees
+    depth_remaining = max_depth - current_depth
+    if depth_remaining < 3:  # If we're near max depth, create smaller subtrees
+        new_size = min(new_size, depth_remaining + 1)
     
     # Try up to 5 times to create a compatible subtree
-    for _ in range(5):
+    for attempt in range(5):
         new_subtree = gp_instance.create_individual(new_size)
+        
+        # Check if the new subtree would exceed depth limit
+        new_subtree_depth = get_tree_depth(new_subtree)
+        if current_depth + new_subtree_depth > max_depth:
+            continue  # Try again with potentially different structure
+        
+        # If we're replacing the root (no parent), just return the new subtree
+        if parent_info is None and node is ind:
+            return new_subtree
         
         # If we have parent info, try direct replacement
         if parent_info:
@@ -1738,7 +1858,7 @@ def apply_subtree_replacement(ind, node, gp_instance, generation, current_depth,
             except AssertionError:
                 continue  # Try again with a new subtree
         
-        # If node and new_subtree have same arity, try content replacement
+        # If no parent info but same arity, try content replacement
         if len(node.successors) == len(new_subtree.successors):
             success = replace_subtree(node, new_subtree)
             if success:
@@ -1747,71 +1867,101 @@ def apply_subtree_replacement(ind, node, gp_instance, generation, current_depth,
     # If all attempts failed, return unchanged individual
     return ind
 
+#used done
 def apply_grow_mutation(ind, node, gp_instance, generation, current_depth, max_depth):
+    """Add complexity to the tree by growing a subtree, respecting arity constraints."""
     if current_depth >= max_depth:
         return ind
-        
-    # If node is a leaf, find its parent to replace it
+    
+    # Calculate size for new subtree based on generation
+    evolution_progress = generation / NUM_GENS
+    min_growth = 2
+    max_growth = min(5, 2 + int(evolution_progress * 3))  # Grows from 2-5
+    new_size = np.random.randint(min_growth, max_growth + 1)
+    
+    # Ensure we don't exceed depth limit
+    depth_budget = max_depth - current_depth
+    
     if node.is_leaf:
+        # For leaves, we must replace via parent
         parent_info = find_parent_and_index(ind, node)
-        if parent_info:
-            parent, idx = parent_info
+        if not parent_info:
+            return ind
             
-            # Create a new subtree
-            max_growth = max(3, int(2 + (generation / NUM_GENS) * 5))
-            new_size = np.random.randint(2, max_growth + 1)
-            
-            # Try up to 5 times to create a compatible replacement
-            for _ in range(5):
-                new_subtree = gp_instance.create_individual(new_size)
-                parent_successors = list(parent.successors)
-                parent_successors[idx] = new_subtree
-                try:
-                    parent.successors = parent_successors
-                    return ind
-                except AssertionError:
-                    continue  # Try again
+        parent, idx = parent_info
+        target_node = node
+        parent_to_modify = parent
+        child_idx = idx
     else:
-        # For non-leaf nodes, try to replace one of its children with a larger subtree
-        if node.successors:
-            child_idx = np.random.randint(0, len(node.successors))
-            child = node.successors[child_idx]
+        # For non-leaves, replace one of its children
+        if not node.successors:
+            return ind
             
-            # Create a new subtree
-            max_growth = max(3, int(2 + (generation / NUM_GENS) * 5))
-            new_size = np.random.randint(2, max_growth + 1)
-            
-            # Try up to 5 times to create a compatible replacement
-            for _ in range(5):
-                new_subtree = gp_instance.create_individual(new_size)
-                node_successors = list(node.successors)
-                node_successors[child_idx] = new_subtree
-                try:
-                    node.successors = node_successors
-                    return ind
-                except AssertionError:
-                    continue  # Try again
+        child_idx = np.random.randint(0, len(node.successors))
+        target_node = node.successors[child_idx]
+        parent_to_modify = node
+    
+    # Try to create a compatible subtree
+    for attempt in range(5):
+        new_subtree = gp_instance.create_individual(new_size)
+        
+        # Check depth constraint
+        new_subtree_depth = get_tree_depth(new_subtree)
+        if new_subtree_depth > depth_budget:
+            continue
+        
+        # Try to replace
+        try:
+            parent_successors = list(parent_to_modify.successors)
+            parent_successors[child_idx] = new_subtree
+            parent_to_modify.successors = parent_successors
+            return ind
+        except AssertionError:
+            continue
     
     return ind
 
 
-def apply_shrink_mutation(ind, node):
-    if not node.is_leaf and node.successors:
-        # Find parent for the node to mutate
-        parent_nodes = [node for node in collect_nodes(ind) if node in node.successors]
-        if parent_nodes:
-            parent = parent_nodes[0]
-            parent_successors = parent.successors[:]
-            child_idx = parent_successors.index(node)
-            
-            # Replace with one of node's children
-            if node.successors:
-                replacement = np.random.choice(node.successors)
-                parent_successors[child_idx] = replacement
-                parent.successors = parent_successors
+#used done
+def apply_shrink_mutation(ind, gp_instance, node):
+    """Simplify part of the tree by replacing with a simpler subtree."""
+    # Can't shrink a leaf
+    if node.is_leaf:
+        return ind
+    
+    # If this is the root and has children, replace root with one of its children
+    if node is ind and node.successors:
+        # Return a random child as the new root
+        return np.random.choice(node.successors)
+    
+    # For non-root nodes, find parent
+    parent_info = find_parent_and_index(ind, node)
+    if not parent_info:
+        return ind
+        
+    parent, idx = parent_info
+    
+    # Choose replacement strategy
+    if node.successors and np.random.rand() < 0.8:  # 80% chance to use a child
+        # Replace with one of node's children (promotes existing structure)
+        replacement = np.random.choice(node.successors)
+    else:
+        # Replace with a new small terminal
+        replacement = gp_instance.create_individual(1)  # Create a leaf
+    
+    # Perform replacement
+    try:
+        parent_successors = list(parent.successors)
+        parent_successors[idx] = replacement
+        parent.successors = parent_successors
+    except AssertionError:
+        pass  # If replacement fails, return unchanged
+    
     return ind
 
+#used done
 def select_crossover_point(nodes, growth_bias):
+    """Select a crossover point with preference for internal nodes in later generations."""
     # Skip root node
     if len(nodes) <= 1:
         return None
@@ -1825,7 +1975,9 @@ def select_crossover_point(nodes, growth_bias):
     else:
         return np.random.choice(nodes[1:])  # Skip root
 
+#used done
 def swap_subtrees(parent1, parent2, point1, point2):
+    """Swap subtrees between two parents."""
     # Get index of crossover points
     idx1 = parent1.successors.index(point1)
     idx2 = parent2.successors.index(point2)
@@ -1837,63 +1989,89 @@ def swap_subtrees(parent1, parent2, point1, point2):
     parent1.successors = successors1
     parent2.successors = successors2
 
-def is_valid_depth(child1, child2, generation):
+#used done
+def is_valid_depth(child1, child2, generation, num_gens):
+    """Check if children have valid depths, with deterministic adaptive relaxation."""
     depth1 = get_tree_depth(child1)
     depth2 = get_tree_depth(child2)
     
-    # More permissive depth check that relaxes as generations progress
-    max_allowed_depth = MAX_TREE_DEPTH
-    if np.random.rand() < (generation / NUM_GENS) * 0.3:
-        # Occasionally allow slightly deeper trees in later generations
-        max_allowed_depth += 2
-        
+    # Deterministically increase allowed depth as evolution progresses
+    evolution_progress = generation / num_gens
+    max_allowed_depth = MAX_TREE_DEPTH + int(2 * evolution_progress)
+    
     return depth1 <= max_allowed_depth and depth2 <= max_allowed_depth
 ```
 
 
 
-## Helper Functions for Mutation & Crossover
+## Mutation & Crossover Helpers
 
-- **`get_mutation_strategies(current_size, growth_factor)`**  
-  Chooses mutation types (“point_mutation”, “subtree_replacement”, “grow”, “shrink”) and assigns probabilities that favor growth when trees are small (size < 15) and a balanced mix when larger. Normalizes so probabilities sum to 1.
+- **`get_mutation_strategies(current_size, generation, num_gens)`**  
+  Compute mutation operators and their probabilities conditioned on tree size and evolution progress.  
+  - Returns a normalized list of strategy-probability pairs (point, subtree, grow, shrink).  
+  - Encourages growth for small trees early and more shrinking for large/late-stage trees.  
+  - Used by the mutation scheduler to adapt exploration/exploitation over generations.
 
 - **`select_mutation_strategy(strategies)`**  
-  Randomly selects one strategy name from the list of `(name, probability)` pairs using the given probabilities.
+  Sample a mutation strategy from a probability distribution.  
+  - Input: list of `(name, prob)` pairs. Output: chosen strategy name.  
+  - Simple utility used by the main mutation routine.
 
 - **`select_node_for_mutation(all_nodes, mutation_type)`**  
-  Picks a node to mutate. If the strategy is “grow”, 70% chance to pick among leaf nodes (to extend the tree); otherwise chooses uniformly from all nodes.
+  Pick a node to mutate with bias towards leaves for growth operations.  
+  - Prefers leaf nodes when `mutation_type == "grow"` (configurable probability), otherwise samples uniformly.  
+  - Used to target sensible locations for grow/shrink/point mutations.
 
 - **`replace_subtree(node, new_subtree, parent=None, parent_idx=None)`**  
-  Attempts to replace `node` with `new_subtree`.  
-  1. If `parent` and `parent_idx` provided: replaces in the parent’s successor list.  
-  2. Else if arities match: copies operator, data, name, and reconnects successors one by one.  
-  Returns `True` on success, `False` otherwise.
+  Replace a node's subtree with `new_subtree`, respecting arity and parent constraints.  
+  - If parent and index provided, replaces by reassigning parent's successors.  
+  - Otherwise attempts an in-place content/successor swap when arities match.  
+  - Returns `True` on success, `False` otherwise. Useful for safe subtree swaps without breaking tree invariants.
 
-- **`find_parent_and_index(root, node)`**  
-  Recursively searches from `root` to locate the direct parent of `node` and its index among `parent.successors`. Returns `(parent, index)` or `None`.
+- **`find_parent_and_index(root, node, path=None)`**  
+  Locate the parent of `node` and the index within the parent's successors.  
+  - Traverses the tree and returns `(parent, index)` or `None` if not found.  
+  - Used by mutation/crossover operators that need parent access for replacements.
 
 - **`apply_point_mutation(ind, node, gp_instance, current_depth, max_depth)`**  
-  If `node` is internal and depth allows, replaces it with a small randomly generated subtree (size up to 3) or simply swaps its operator via `replace_subtree`.
+  Apply a local operator/terminal change at `node` (operator swap or terminal perturbation).  
+  - For internal nodes: replace the operator with another of the same arity and update the name.  
+  - For leaves: mutate variables (switch `x#`) or perturb constants.  
+  - Returns the (possibly modified) individual. Used for fine-grained exploration.
 
 - **`apply_subtree_replacement(ind, node, gp_instance, generation, current_depth, max_depth)`**  
-  Generates a new subtree of size influenced by `generation` and attempts up to five times to graft it in place of `node`, using either direct parent replacement or `replace_subtree` when arity matches.
+  Replace `node` with a newly generated subtree while respecting depth/arity constraints.  
+  - New subtree size adapts with evolution progress; multiple attempts are tried to satisfy depth limits.  
+  - Handles root replacement, parent-index replacement, and content-based replacement when compatible.  
+  - Returns the updated individual or the original if replacement fails.
 
 - **`apply_grow_mutation(ind, node, gp_instance, generation, current_depth, max_depth)`**  
-  When `node` is a leaf: replaces it in its parent with a larger subtree.  
-  When internal: picks one child and replaces it with a larger subtree.  
-  Both use up to five attempts to ensure arity compatibility.
+  Increase tree complexity by inserting a new subtree at/under `node`.  
+  - Chooses a growth size based on generation progress and enforces depth budget.  
+  - Replaces a leaf via its parent or inserts under a non-leaf child.  
+  - Attempts several creations to avoid violating depth constraints.
 
-- **`apply_shrink_mutation(ind, node)`**  
-  For non-leaf `node`, finds its parent and replaces `node` with one of its own children, thereby pruning the tree.
+- **`apply_shrink_mutation(ind, gp_instance, node)`**  
+  Simplify the tree by replacing `node` with a smaller subtree or an existing child.  
+  - Can replace the root with one of its children or swap a non-root node with a child or new terminal.  
+  - Useful for parsimony pressure and recovering from bloat.
 
 - **`select_crossover_point(nodes, growth_bias)`**  
-  Chooses a crossover point: skips the root and, with probability `growth_bias`, picks among internal nodes; otherwise picks any non-root node uniformly.
+  Choose a crossover point (prefers internal nodes later in evolution).  
+  - Skips the root and uses `growth_bias` to favor internal nodes; otherwise samples non-root nodes uniformly.  
+  - Used to control how disruptive crossover is across generations.
 
 - **`swap_subtrees(parent1, parent2, point1, point2)`**  
-  Identifies each point’s index in its parent’s successor list, then swaps the two subtrees by reassigning `parent.successors`.
+  Exchange subtrees between two parents at specified crossover points.  
+  - Locates indices of the points in their respective parents' successors and swaps them atomically.  
+  - Core operation for subtree crossover.
 
-- **`is_valid_depth(child1, child2, generation)`**  
-  Checks both offspring depths against `MAX_TREE_DEPTH`, but with a small chance (proportional to `generation/NUM_GENS`) to allow depth + 2 in later generations, supporting controlled bloat.
+- **`is_valid_depth(child1, child2, generation, num_gens)`**  
+  Check depth constraints for offspring with deterministic adaptive relaxation.  
+  - Computes depths and allows a small, generation-dependent depth increase (`MAX_TREE_DEPTH + int(2 * progress)`).  
+  - Ensures children do not violate the (adaptively relaxed) maximum depth before acceptance.
+
+
 
 
 
@@ -1907,50 +2085,175 @@ def is_valid_depth(child1, child2, generation):
 # -------------------------------
 # Streamlined Selection, Mutation, and Crossover Operations
 # -------------------------------
-def tournament_select(pop, generation=0, size_aware=False):
+#used done
+def _dominates(o1, o2):
+    """
+    Return True if objective‐vector o1 dominates o2.
+    Both are tuples of floats to be minimised.
+    """
+    return all(a <= b for a, b in zip(o1, o2)) and any(a < b for a, b in zip(o1, o2))
+
+def fast_nondominated_sort(pop, objectives):
+    """
+    pop: list of individuals
+    objectives: list of tuples (obj1, obj2) for each individual
+    Returns: list of fronts, each front is a list of indices into pop
+    """
+    N = len(pop)
+    S = [ [] for _ in range(N) ]     # S[p] = list of individuals p dominates
+    n = [ 0 for _ in range(N) ]      # n[p] = how many dominate p
+    fronts = [ [] ]
+
+    for p in range(N):
+        for q in range(N):
+            if p == q: continue
+            if _dominates(objectives[p], objectives[q]):
+                S[p].append(q)
+            elif _dominates(objectives[q], objectives[p]):
+                n[p] += 1
+        if n[p] == 0:
+            fronts[0].append(p)
+
+    i = 0
+    while fronts[i]:
+        next_front = []
+        for p in fronts[i]:
+            for q in S[p]:
+                n[q] -= 1
+                if n[q] == 0:
+                    next_front.append(q)
+        i += 1
+        fronts.append(next_front)
+    # the last front will be empty
+    return fronts[:-1]
+
+
+def crowding_distance(front, objectives):
+    """
+    front: list of indices into the population
+    objectives: full list of objective‐tuples
+    Returns: dict mapping index -> crowding distance
+    """
+    distance = {p: 0.0 for p in front}
+    num_obj = len(objectives[0])
+
+    for m in range(num_obj):
+        # sort front by the m-th objective
+        front_sorted = sorted(front, key=lambda p: objectives[p][m])
+        min_val = objectives[front_sorted[0]][m]
+        max_val = objectives[front_sorted[-1]][m]
+
+        # assign infinite distance to extremes
+        distance[front_sorted[0]] = distance[front_sorted[-1]] = float("inf")
+
+        if max_val == min_val:
+            # all equal; skip internal distances
+            continue
+
+        # for each interior point, add normalized objective‐range contribution
+        for i in range(1, len(front_sorted) - 1):
+            prev_obj = objectives[front_sorted[i - 1]][m]
+            next_obj = objectives[front_sorted[i + 1]][m]
+            distance[front_sorted[i]] += (next_obj - prev_obj) / (max_val - min_val)
+
+    return distance
+
+
+def nsga2_parent_selection(pop, num_parents, generation, pop_stats):
+    """
+    Select `num_parents` parents from `pop` via NSGA-II.
+    - primary objective: minimize (–fitness)
+    - secondary objective: minimize complexity = tree size
+    """
+
+    # 1) Compute objectives for each individual
+    objectives = []
+    for ind in pop:
+        # fitness is higher == better, so we invert to get a "minimize" objective
+        fit = unified_compute_fitness(ind, generation, pop_stats)
+        complexity = len(collect_nodes(ind))
+        objectives.append( ( -fit, complexity ) )
+
+    # 2) Fast non‐dominated sort
+    fronts = fast_nondominated_sort(pop, objectives)
+
+    # 3) Fill parents by front, using crowding distance to break ties
+    selected = []
+    for front in fronts:
+        if len(selected) + len(front) <= num_parents:
+            # take all of this front
+            selected.extend(front)
+        else:
+            # need only a subset: sort by descending crowding‐distance
+            cd = crowding_distance(front, objectives)
+            # sort indices by cd, largest first
+            front_sorted = sorted(front, key=lambda p: cd[p], reverse=True)
+            n_needed = num_parents - len(selected)
+            selected.extend(front_sorted[:n_needed])
+            break
+
+    # finally, return the actual individual objects
+    return [ copy.deepcopy(pop[i]) for i in selected ]
+
+
+def lexicase_select(pop, errors):
+    """
+    Select one parent by lexicase:
+      pop     : list of individuals
+      errors  : dict mapping each individual -> 1D array of case-errors
+    Returns a single individual.
+    """
+    # number of test cases / data points
+    M = next(iter(errors.values())).shape[0]
+    candidates = pop.copy()
     
-    participants = np.random.choice(pop, size=min(TOURN_SIZE, len(pop)), replace=False)
+    # random ordering of the M cases
+    for case in np.random.permutation(M):
+        # find the best (minimum) error on this case
+        best_err = min(errors[ind][case] for ind in candidates)
+        # filter out anyone who isn’t equally best
+        candidates = [ind for ind in candidates if errors[ind][case] == best_err]
+        # if only one left, stop early
+        if len(candidates) == 1:
+            break
     
-    if size_aware and np.random.rand() < min(0.3, (generation / NUM_GENS) * 0.4):
-        avg_size = np.mean([len(collect_nodes(ind)) for ind in pop])
-        
-        # Occasionally favor larger trees if they're above average size
-        # but not too far below average fitness
-        sorted_participants = sorted(participants, key=lambda ind: ind.fitness, reverse=True)
-        
-        for ind in sorted_participants:
-            ind_size = len(collect_nodes(ind))
-            if ind_size > avg_size * 1.2:  # Tree is 20% larger than average
-                # If fitness is at least 80% of the best participant, select it
-                best_fitness = sorted_participants[0].fitness
-                if ind.fitness >= best_fitness * 0.8:
-                    return ind
-    
-    # Default to regular tournament selection
-    return max(participants, key=lambda ind: ind.fitness)
+    # if multiple remain after all cases, pick one at random
+    return np.random.choice(candidates)
 
 
-
-
+#used done
 def enhanced_mutate(ind, gp_instance, generation):
+    """
+    Unified mutation function that handles all mutation strategies.
     
+    Parameters:
+    - ind: The individual to mutate
+    - gp_instance: The GP system instance
+    - generation: Current generation number
+    """
+    # Copy the individual to avoid modifying the original
     ind_copy = copy.deepcopy(ind)
     
+    # Calculate current size and tree depth
     current_size = len(collect_nodes(ind_copy))
     current_depth = get_tree_depth(ind_copy)
     
     # Growth factor increases with generation
     growth_factor = min(0.8, generation / NUM_GENS)
     
-    strategies = get_mutation_strategies(current_size, growth_factor)
+    # Get mutation strategies with appropriate probabilities
+    strategies = get_mutation_strategies(current_size, generation, NUM_GENS)
     
+    # Select a mutation strategy
     strategy = select_mutation_strategy(strategies)
     
+    # Get all nodes for potential mutation
     all_nodes = collect_nodes(ind_copy)
     
     # Select a node to mutate, with bias toward appropriate nodes for the strategy
     node = select_node_for_mutation(all_nodes, strategy)
     
+    # Apply the selected mutation strategy
     if strategy == "point_mutation":
         ind_copy = apply_point_mutation(ind_copy, node, gp_instance, current_depth, MAX_TREE_DEPTH)
     elif strategy == "subtree_replacement":
@@ -1958,204 +2261,247 @@ def enhanced_mutate(ind, gp_instance, generation):
     elif strategy == "grow":
         ind_copy = apply_grow_mutation(ind_copy, node, gp_instance, generation, current_depth, MAX_TREE_DEPTH)
     elif strategy == "shrink":
-        ind_copy = apply_shrink_mutation(ind_copy, node)
+        ind_copy = apply_shrink_mutation(ind_copy, gp_instance, node)
     
-    # Validate the tree after mutation
-    ind_copy = validate_and_fix_tree(ind_copy)
     
     return ind_copy
 
 
+#used done
 def growth_enhanced_crossover(parent1, parent2, generation):
-    
+    """Performs crossover between two parents with enhanced growth potential."""
     # Make deep copies to avoid modifying the parents
     child1 = copy.deepcopy(parent1)
     child2 = copy.deepcopy(parent2)
     
-    # Allow crossover to become more aggressive in later generations
-    growth_bias = min(0.8, 0.3 + (generation / NUM_GENS) * 0.5)
+    # Calculate growth bias
+    evolution_progress = generation / NUM_GENS
+    growth_bias = min(0.8, 0.3 + evolution_progress * 0.5)
     
-    # Select nodes from both parents, with increasing bias towards internal nodes
-    # that could lead to more interesting genetic material exchange
+    # Collect nodes from both children
     nodes1 = collect_nodes(child1)
     nodes2 = collect_nodes(child2)
     
+    # Select crossover points
     point1 = select_crossover_point(nodes1, growth_bias)
     point2 = select_crossover_point(nodes2, growth_bias)
     
-    # If valid crossover points found in both trees
-    if point1 and point2:
-        # Find parent nodes for each selected crossover point
-        parent_nodes1 = [n for n in nodes1 if point1 in n.successors]
-        parent_nodes2 = [n for n in nodes2 if point2 in n.successors]
+    if point1 is None or point2 is None:
+        return child1, child2
+    
+    # Find parents of crossover points
+    parent1_info = find_parent_and_index(child1, point1)
+    parent2_info = find_parent_and_index(child2, point2)
+    
+    if parent1_info is None or parent2_info is None:
+        return child1, child2
+    
+    parent1_node, idx1 = parent1_info
+    parent2_node, idx2 = parent2_info
+    
+    # Perform crossover by swapping subtrees
+    try:
+        successors1 = list(parent1_node.successors)
+        successors2 = list(parent2_node.successors)
         
-        if parent_nodes1 and parent_nodes2:
-            # Perform the crossover by swapping subtrees
-            swap_subtrees(parent_nodes1[0], parent_nodes2[0], point1, point2)
+        # Swap the subtrees
+        successors1[idx1], successors2[idx2] = point2, point1
+        
+        parent1_node.successors = successors1
+        parent2_node.successors = successors2
+        
+        # Validate depth constraints
+        if not is_valid_depth(child1, child2, generation, NUM_GENS):
+            # Crossover created invalid trees, return originals
+            # Don't create new individuals, just return copies of parents
+            return copy.deepcopy(parent1), copy.deepcopy(parent2)
             
-            if not is_valid_depth(child1, child2, generation):
-                # If constraints violated, create new children with appropriate sizes
-                size1 = len(collect_nodes(parent1))
-                size2 = len(collect_nodes(parent2))
-                child1 = gp.create_individual(size1)
-                child2 = gp.create_individual(size2)
+    except (AssertionError, Exception) as e:
+        # If crossover fails, return copies of originals
+        return copy.deepcopy(parent1), copy.deepcopy(parent2)
     
     return child1, child2
 
+
+
 ```
 
-## Streamlined Selection, Mutation & Crossover Operations
+## Streamlined Selection, Mutation, and Crossover Operations
 
-### `tournament_select(pop, generation=0, size_aware=False)`  
-**Objective:** Efficiently choose parents for reproduction by balancing raw fitness with structural complexity (tree size) when requested.  
-- **Fitness-driven:** Primarily picks the individual with the highest fitness among a random subset (`TOURN_SIZE`), ensuring strong candidates propagate.  
-- **Size-aware mode:** As evolution progresses, occasionally biases selection toward larger—yet still competitive—trees, promoting discovery of more expressive models without sacrificing quality.
+- **`_dominates(o1, o2)`**  
+  Check Pareto dominance between two objective tuples (minimisation).  
+  - Returns `True` iff `o1` is no worse in all objectives and strictly better in at least one.  
+  - Used by non-dominated sorting.
+
+- **`fast_nondominated_sort(pop, objectives)`**  
+  Partition population into Pareto fronts (NSGA-II style).  
+  - Input: `pop` and `objectives` (list of objective-tuples).  
+  - Output: list of fronts (each a list of indices).  
+  - Core of multi-objective parent selection.
+
+- **`crowding_distance(front, objectives)`**  
+  Compute crowding distances for individuals within a front.  
+  - Returns a map index → crowding distance used to prefer diverse solutions at ties.  
+  - Extremes get infinite distance; internal points receive normalized sums.
+
+- **`nsga2_parent_selection(pop, num_parents, generation, pop_stats)`**  
+  Select parents using NSGA-II (minimise `-fitness` and complexity).  
+  - Builds objectives via `unified_compute_fitness` and tree size, sorts by fronts, breaks ties with crowding distance.  
+  - Returns deep-copied individuals ready for variation.
+
+- **`lexicase_select(pop, errors)`**  
+  Single-parent selection by lexicase filtering across test-cases.  
+  - Random case order; iteratively keep only best-on-case candidates; pick random if multiple remain.  
+  - Useful for case-wise specialization and maintaining behavioral diversity.
+
+- **`enhanced_mutate(ind, gp_instance, generation)`**  
+  Unified mutation dispatcher that picks a strategy and applies it.  
+  - Copies the individual, computes current size/depth, samples a strategy, selects a node, and applies the corresponding mutation.  
+  - Centralises mutation logic and adaptive behaviour.
+
+- **`growth_enhanced_crossover(parent1, parent2, generation)`**  
+  Subtree crossover with a growth bias and depth validation.  
+  - Chooses crossover points with a generation-dependent growth bias, swaps subtrees and rejects offspring that violate adaptive depth limits (returns originals in that case).  
+  - Returns `(child1, child2)` ready for evaluation.
 
 ---
 
-### `enhanced_mutate(ind, gp_instance, generation)`  
-**Objective:** Introduce targeted variation into an individual, adapting both the type and intensity of mutation to its current size, depth, and the evolutionary stage.  
-- **Adaptive strategy mix:** Chooses among point mutations, subtree replacements, growth, or shrink operations based on tree size and a “growth factor” that increases over generations.  
-- **Node-specific targeting:** Selects which node to mutate—favoring leaves when growing or internal nodes for structural tweaks—so changes are semantically meaningful.  
-- **Robustness:** Deep-copies the individual, applies mutation, then validates and repairs cycles or invalid trees, ensuring every offspring is structurally sound.
-
----
-
-### `growth_enhanced_crossover(parent1, parent2, generation)`  
-**Objective:** Recombine two parents to produce offspring that not only blend existing structures but also encourage constructive growth in later generations.  
-- **Controlled bias:** Starts with modest preference for internal crossover points and ramps this up over time (via `growth_bias`), fostering exchange of larger substructures and more complex behaviors as the search matures.  
-- **Depth safeguarding:** After swapping subtrees, checks offspring depths against a (potentially relaxed) maximum; if violated, regenerates new individuals with appropriate sizes to prevent uncontrolled bloat.  
-- **Preservation of diversity:** By copying parents before crossover and conditionally repairing oversized children, this function maintains a healthy balance between exploration of new structures and respect for computational constraints.
 
 
-
----
 
 
 
 
 ```python
-# Diversity injection that creates larger trees in later generations
-def enhanced_diversity_injection(population, gp_instance, generation):
-    diversity = calculate_population_diversity(population)
-    
-    # Calculate average tree size
-    sizes = [len(collect_nodes(ind)) for ind in population]
-    avg_size = np.mean(sizes)
-    max_size = max(sizes)
-    
-    # More aggressive diversity injection as generations progress
-    diversity_threshold = max(0.1, 0.3 - (generation / NUM_GENS) * 0.1)
-    
-    # Inject diversity if population is too homogeneous or trees are too small
-    if diversity < diversity_threshold or (generation > NUM_GENS * 0.5 and max_size < 20):
-        print(f"Generation {generation}: Low diversity ({diversity:.2f}) or small trees (avg:{avg_size:.1f}, max:{max_size}). Injecting new individuals.")
-        
-        # Replace more individuals in later generations
-        replacement_rate = min(0.2, 0.1 + (generation / NUM_GENS) * 0.1)
-        num_to_replace = max(1, int(replacement_rate * len(population)))
-        
-        if generation > NUM_GENS * 0.4 and avg_size < 15:
-            # Replace smallest trees with some probability
-            candidates = [(i, ind) for i, ind in enumerate(population) 
-                         if len(collect_nodes(ind)) < avg_size * 0.8]
-            if candidates:
-                # Replace some smallest trees
-                small_indices = [i for i, _ in sorted(candidates, key=lambda x: len(collect_nodes(x[1])))[:num_to_replace//2]]
-                # replace some lowest fitness individuals
-                sorted_pop = sorted(enumerate(population), key=lambda x: x[1].fitness)
-                low_fitness_indices = [i for i, _ in sorted_pop[:num_to_replace - len(small_indices)]]
-                indices_to_replace = small_indices + low_fitness_indices
-            else:
-                # Default to replacing lowest fitness
-                sorted_pop = sorted(enumerate(population), key=lambda x: x[1].fitness)
-                indices_to_replace = [i for i, _ in sorted_pop[:num_to_replace]]
-        else:
-            # Default to replacing lowest fitness
-            sorted_pop = sorted(enumerate(population), key=lambda x: x[1].fitness)
-            indices_to_replace = [i for i, _ in sorted_pop[:num_to_replace]]
-        
-        # Create new individuals with size scaling with generation
-        new_individuals = []
-        for _ in range(len(indices_to_replace)):
-            # Progressively larger trees as generations increase
-            min_size = INITIAL_SIZE_MIN + int((generation / NUM_GENS) * 3)
-            max_size = INITIAL_SIZE_MAX + int((generation / NUM_GENS) * 15)
-            
-            size = np.random.randint(min_size, max_size + 1)
-            new_ind = gp_instance.create_individual(size)
-            new_ind.fitness = unified_compute_fitness(new_ind, generation)
-            new_individuals.append(new_ind)
-        
-        # Replace selected individuals
-        for idx, new_ind in zip(indices_to_replace, new_individuals):
-            population[idx] = new_ind
-    
-    return population
-
-# -------------------------------
-# Adaptive Diversity Maintenance
-# -------------------------------
+#used done
 def calculate_population_diversity(population, sample_size=None):
+    """
+    Calculate population diversity using semantic distance between individuals.
     
+    Returns a diversity score between 0 and 1.
+    """
+    if len(population) <= 1:
+        return 0.0
+        
+    # Sample for efficiency if population is large
     if sample_size and sample_size < len(population):
         individuals = random.sample(population, sample_size)
     else:
         individuals = population
     
     n = len(individuals)
-    if n <= 1:
-        return 0.0
+    
+    # Pre-compute evaluations for efficiency
+    evaluations = []
+    for ind in individuals:
+        try:
+            eval_result = np.array(gp.evaluate2(ind, x_data, variable_names=[f'x{i}' for i in range(x_data.shape[1])]))
+            evaluations.append(eval_result)
+        except:
+            evaluations.append(None)
     
     # Calculate pairwise distances
-    total_distance = 0.0
-    pair_count = 0
-    
+    distances = []
     for i in range(n):
         for j in range(i+1, n):
-            distance = semantic_distance(individuals[i], individuals[j], x_data)
-            if distance != float('inf'):
-                total_distance += distance
-                pair_count += 1
-                
-    # Normalize and return diversity score
-    if pair_count > 0:
-        avg_distance = total_distance / pair_count
-        normalized_diversity = min(1.0, avg_distance / 10.0)
-        return normalized_diversity
-    else:
+            if evaluations[i] is not None and evaluations[j] is not None:
+                distance = np.mean(np.abs(evaluations[i] - evaluations[j]))
+                distances.append(distance)
+    
+    if not distances:
         return 0.0
+    
+    # Use percentile-based normalization for robustness
+    avg_distance = np.mean(distances)
+    # Normalize using 90th percentile to avoid outliers affecting the scale
+    scale = np.percentile(distances, 90) if distances else 1.0
+    
+    return min(1.0, avg_distance / (scale + 1e-6))
 
+#used done
 def enhanced_diversity_injection(population, gp_instance, generation):
+    """
+    Inject diversity into the population with adaptive strategies.
+    """
+    # Calculate current population statistics
+    sizes = [len(collect_nodes(ind)) for ind in population]
+    avg_size = np.mean(sizes)
+    max_size = max(sizes)
+    min_size = min(sizes)
     
-    # Early generations: subtle diversity, later generations: more aggressive
-    diversity_rate = 0.05 + (generation / NUM_GENS) * 0.15
+    # Calculate diversity
+    sample_size = min(30, len(population))  # Increased sample for better estimate
+    diversity = calculate_population_diversity(population, sample_size)
     
-    current_diversity = calculate_population_diversity(population, sample_size=min(20, len(population)))
+    # Adaptive thresholds
+    evolution_progress = generation / NUM_GENS
     
-    # Only inject if diversity is low
-    if current_diversity < 0.3 or (generation % 10 == 0 and generation > 0):
-        num_to_inject = max(1, int(POP_SIZE * diversity_rate))
-        
-        # Identify individuals to replace (lower fitness ones)
-        population_sorted = sorted(population, key=lambda ind: ind.fitness)
-        to_replace = population_sorted[:num_to_inject]
-        
-        # Create new diverse individuals
-        for i in range(num_to_inject):
-            # More aggressive size scaling with generation
-            base_size = 3 + int((generation / NUM_GENS) * 12)
-            size_range = max(INITIAL_SIZE_MIN, base_size + np.random.randint(-2, 5))
-            size = np.random.randint(INITIAL_SIZE_MIN, size_range + 1)
+    # Diversity threshold decreases over time (more tolerant of convergence)
+    diversity_threshold = 0.4 * (1 - evolution_progress * 0.5)  # 0.4 to 0.2
+    
+    # Size threshold increases over time (expect larger trees)
+    expected_avg_size = INITIAL_SIZE_MIN + evolution_progress * 15
+    size_too_small = avg_size < expected_avg_size * 0.7
+    
+    # Determine if injection is needed
+    need_diversity = diversity < diversity_threshold
+    need_growth = evolution_progress > 0.3 and size_too_small
+    
+    if need_diversity or need_growth:
+        # Adaptive replacement rate
+        base_rate = 0.05
+        if need_diversity and need_growth:
+            replacement_rate = base_rate + 0.1 * evolution_progress
+        elif need_growth:
+            replacement_rate = base_rate + 0.05 * evolution_progress
+        else:
+            replacement_rate = base_rate
             
+        num_to_replace = max(1, int(replacement_rate * len(population)))
+        
+        # Select individuals to replace
+        if need_growth:
+            # Prioritize small trees for replacement
+            size_fitness_pairs = [(i, ind, len(collect_nodes(ind)), ind.fitness) 
+                                for i, ind in enumerate(population)]
+            
+            # Sort by size first, then by fitness
+            size_fitness_pairs.sort(key=lambda x: (x[2], x[3]))
+            indices_to_replace = [x[0] for x in size_fitness_pairs[:num_to_replace]]
+        else:
+            # Replace lowest fitness individuals
+            sorted_pop = sorted(enumerate(population), key=lambda x: x[1].fitness)
+            indices_to_replace = [i for i, _ in sorted_pop[:num_to_replace]]
+        
+        # Create new individuals
+        for idx in indices_to_replace:
+            # Size range that grows with generation
+            if need_growth:
+                # Encourage larger trees
+                new_min_size = int(avg_size * 0.8)
+                new_max_size = int(max_size * 1.2)
+            else:
+                # Normal diversity injection
+                new_min_size = INITIAL_SIZE_MIN + int(evolution_progress * 5)
+                new_max_size = INITIAL_SIZE_MAX + int(evolution_progress * 10)
+            
+            # Ensure valid range
+            new_min_size = max(INITIAL_SIZE_MIN, new_min_size)
+            new_max_size = max(new_min_size + 1, new_max_size)
+            
+            size = np.random.randint(new_min_size, new_max_size + 1)
             new_ind = gp_instance.create_individual(size)
             new_ind.fitness = unified_compute_fitness(new_ind, generation)
             
-            # Replace in the population
-            idx = population.index(to_replace[i])
             population[idx] = new_ind
+        
+        reason = []
+        if need_diversity:
+            reason.append(f"low diversity ({diversity:.3f})")
+        if need_growth:
+            reason.append(f"small trees (avg:{avg_size:.1f})")
             
-        print(f"Generation {generation}: Injected {num_to_inject} new individuals for diversity")
+        print(f"Generation {generation}: Injected {num_to_replace} individuals due to {' and '.join(reason)}")
     
     return population
 
@@ -2165,41 +2511,106 @@ def enhanced_diversity_injection(population, gp_instance, generation):
 
 
 
-## Diversity Maintenance & Injection
+## Diversity & Injection Utilities
 
-### `calculate_population_diversity(population, sample_size=None)`  
-**Objective:** Quantify how “different” individuals are based on their semantic outputs, providing a normalized score in [0, 1].  
-- **Sampling:** Optionally subsamples the population for efficiency.  
-- **Pairwise Semantic Distance:** Uses `semantic_distance(ind_i, ind_j, x_data)` to measure average absolute output difference over all (or sampled) pairs.  
-- **Normalization:** Divides the mean pairwise distance by a constant (10.0) and caps at 1.0, yielding a consistent diversity metric regardless of problem scale.
+- **`calculate_population_diversity(population, sample_size=None)`**  
+  Compute a normalized population diversity score (0..1) using semantic distances.  
+  - Evaluates individuals on `x_data` and computes pairwise mean absolute differences between outputs.  
+  - Uses optional subsampling (`sample_size`) for efficiency; returns `0.0` for trivial or failed evaluations.  
+  - Normalizes using a high-percentile scale (90th) to reduce outlier influence and returns `min(1.0, avg/scale)`.  
+  - Input: `population`, optional `sample_size`. Output: scalar diversity.  
+  - Cost: `O(S * n^2)` for `n` sampled individuals and `S` samples per evaluation (so subsample when used frequently).  
+  - Use: monitoring population behaviour, triggering diversity-preserving interventions.
 
----
-
-### `enhanced_diversity_injection(population, gp_instance, generation)`  
-**Objective:** Prevent premature convergence by injecting new, larger—or structurally different—individuals when diversity drops or trees remain too small.  
-
-1. **Assess Diversity & Size:**  
-   - Compute current diversity via `calculate_population_diversity`.  
-   - Track average and maximum tree sizes.  
-
-2. **Trigger Conditions:**  
-   - **Low semantic diversity:** below a `diversity_threshold` that tightens over generations (`0.3 → 0.1`).  
-   - **Under‐complexity:** after halfway through evolution, if all trees remain small (`max_size < 20`).  
-
-3. **Select Replacement Candidates:**  
-   - Later generations may target the smallest trees (≤80% of average size) *and* lowest‐fitness individuals.  
-   - Earlier or fallback cases simply replace the worst‐performers by fitness.
-
-4. **Generate New Individuals:**  
-   - **Progressive scaling:** minimum and maximum subtree sizes increase with `generation`, ensuring later injections are larger and more exploratory.  
-   - **Fitness initialization:** immediately evaluates and assigns a fitness to each newcomer (`unified_compute_fitness`).
-
-5. **Population Update:**  
-   - Overwrites selected indices with new individuals, injecting diversity and structural novelty.
-
-By dynamically coupling injection rate and tree size to the generation count—and selectively replacing both under‐performing and under‐sized individuals—this mechanism maintains semantic variety and fosters exploration of more complex expressions as evolution proceeds.  
+- **`enhanced_diversity_injection(population, gp_instance, generation)`**  
+  Adaptively inject new individuals to maintain behavioural and structural diversity.  
+  - Computes current size statistics and diversity (via `calculate_population_diversity`).  
+  - Applies generation-aware thresholds: diversity tolerance decays over time; expected average size grows with evolution progress.  
+  - Decides whether to inject (replace) a small fraction of the population and adapts replacement rate based on whether growth and/or diversity are needed.  
+  - Replacement policy: prefer small/low-fitness individuals when growth is needed; otherwise replace lowest-fitness individuals.  
+  - New individual sizes are chosen from generation-dependent ranges; new individuals are created with `gp_instance.create_individual()` and given an initial fitness via `unified_compute_fitness`.  
+  - Returns the possibly modified `population`.  
+  - Cost: dominated by diversity evaluation and individual creation; tuned to be conservative (small replacement rates).  
+  - Use: avoid premature convergence, encourage controlled bloat when beneficial, and maintain exploration throughout the run.
 
 ---
+
+
+```python
+
+
+
+
+# Try to include specialized solutions like sin(x0)
+#used done
+def try_create_special_solutions():
+    """Try to create potential solutions directly."""
+    special_solutions = []
+    
+    # Make sure we're using the correct variable naming convention
+    # Check how many variables we have first
+    num_vars = x_data.shape[1]
+    
+    # Create terminal nodes by directly instantiating Node with a string,
+    # which, per the teacher library, creates a terminal.
+    if num_vars >= 1:
+        try:
+            # Create sin(x0)
+            x0_node = Node("x0")
+            sin_node = Node(custom_sin, [x0_node], name="custom_sin")
+            special_solutions.append(sin_node)
+        except Exception as e:
+            print(f"Error creating sin(x0): {e}")
+    
+    if num_vars >= 2:
+        try:
+            # Create x0 + x1 using the library's Node constructor for operators
+            x0_node = Node("x0")
+            x1_node = Node("x1")
+            add_node = Node(operator.add, [x0_node, x1_node], name="add")
+            special_solutions.append(add_node)
+        except Exception as e:
+            print(f"Error creating x0 + x1: {e}")
+        
+        try:
+            # Create x0 * x1
+            x0_node = Node("x0")
+            x1_node = Node("x1")
+            mul_node = Node(operator.mul, [x0_node, x1_node], name="mul")
+            special_solutions.append(mul_node)
+        except Exception as e:
+            print(f"Error creating x0 * x1: {e}")
+    
+    if num_vars >= 1:
+        try:
+            # Create sin(cos(x0))
+            x0_node = Node("x0")
+            cos_node = Node(custom_cos, [x0_node], name="custom_cos")
+            sin_node = Node(custom_sin, [cos_node], name="custom_sin")
+            special_solutions.append(sin_node)
+        except Exception as e:
+            print(f"Error creating sin(cos(x0)): {e}")
+    
+    return special_solutions
+
+
+
+
+```
+
+## Specialized Seed Solutions
+
+- **`try_create_special_solutions()`**  
+  Generate a small set of hand-crafted candidate individuals (e.g. `sin(x0)`, `x0 + x1`, `x0 * x1`, `sin(cos(x0))`) to seed the population.  
+  - Checks `x_data.shape[1]` to decide which templates are valid given the number of input variables.  
+  - Builds `Node` objects directly using the library's API (terminals like `"x0"` and operator callables like `custom_sin`, `operator.add`).  
+  - Catches and logs construction errors per-template to avoid crashing the run.  
+  - Returns a list of ready-to-evaluate individuals (may be empty if construction fails).  
+  - Use: warm-start the run with known useful structures, speed up early convergence, provide sanity-check baselines.  
+  - Notes: depends on the teacher `Node` constructor and the `x#` naming convention — adjust if your variable naming differs.
+
+
+
 
 
 
@@ -2209,17 +2620,23 @@ By dynamically coupling injection rate and tree size to the generation count—a
 
 
 
+
+#used done
 def run_streamlined_evolution():
-    
-    global LENGTH_PENALTY, population
-    
+    """
+    Streamlined evolutionary algorithm with adaptive fitness function.
+    """
+    # Initialize history tracking
     history = {
         'best_fitness': [],
         'avg_fitness': [],
         'complexity': [],
-        'diversity': []
+        'diversity': [],
+        'best_mse': [],  # Add MSE tracking
+        'avg_mse': []    # Add average MSE tracking
     }
     
+    # Track algorithm state
     state = {
         'stagnation_counter': 0,
         'last_best_fitness': float('-inf'),
@@ -2227,331 +2644,387 @@ def run_streamlined_evolution():
         'max_size_seen': max(len(collect_nodes(ind)) for ind in population),
         'found_special_solution': False,
         'special_solution_gen': -1,
-        'best_formula_found': ""
+        'best_formula_found': "",
     }
     
-    # Sort initial population by fitness (highest first)
-    population = sorted(population, key=lambda ind: ind.fitness, reverse=True)
+    # Initialize population statistics
+    pop_stats = {'best_mse': float('inf'), 'avg_mse': float('inf'), 'avg_size': 20}
+    
+    # Define semantic threshold if not already defined
+    MIN_SEMANTIC_THRESHOLD = 0.01
+    
+    # Evaluate initial population with pop_stats
+    for ind in population:
+        ind.fitness = unified_compute_fitness(ind, 0, pop_stats)
+    
+    # Sort initial population by fitness
+    population_copy = sorted(population, key=lambda ind: ind.fitness, reverse=True)
     
     # Main evolutionary loop
     for gen in tqdm(range(NUM_GENS), desc="Generations", leave=True):
-        # ---- PHASE 1: Diversity and Offspring Generation ----
+        # ---- PHASE 0: Update Population Statistics ----
+        mse_values = []
+        sizes = []
+        for ind in population_copy:
+            try:
+                pred = gp.evaluate2(ind, x_data, variable_names=[f'x{i}' for i in range(x_data.shape[1])])
+                mse = np.mean((pred - y_true) ** 2)
+                mse_values.append(mse)
+                sizes.append(len(collect_nodes(ind)))
+            except:
+                pass
+                
+        if mse_values:
+            pop_stats['best_mse'] = min(mse_values)
+            pop_stats['avg_mse'] = np.mean(mse_values)
+            pop_stats['avg_size'] = np.mean(sizes)
         
-        # Inject diversity to prevent premature convergence
-        population = enhanced_diversity_injection(population, gp, gen)
-        
-        # Determine offspring count based on stagnation indicators
+        # ---- PHASE 1: Adaptive Offspring Size ----
         offspring_size = OFFSPRING_NUM
+        
+        # Increase offspring if stagnating
         if state['stagnation_counter'] > 10:
-            offspring_size = int(OFFSPRING_NUM * 1.5)
-            tqdm.write(f"Generation {gen}: Fitness stagnation detected. Increasing offspring to {offspring_size}")
-        if state['growth_stagnation'] > 8:
-            offspring_size = int(offspring_size * 1.2)
-            tqdm.write(f"Generation {gen}: Size stagnation detected. Further increasing offspring to {offspring_size}")
-        
-        # ---- PHASE 2: Generate New Offspring ----
-        new_offspring = []
-        
-        # Generate offspring through crossover and mutation
-        while len(new_offspring) < offspring_size:
-            # Select first parent using tournament selection
-            parent1 = tournament_select(population, gen)                    
+            offspring_size = min(int(OFFSPRING_NUM * 1.5), POP_SIZE)
             
+        if state['growth_stagnation'] > 8:
+            offspring_size = min(int(offspring_size * 1.2), POP_SIZE)
+        
+        # ---- PHASE 2: Diversity Injection ----
+        population_copy = enhanced_diversity_injection(population_copy, gp, gen)
+        
+        # Build per‐case error dict for lexicase
+        errors = {}
+        for ind in population_copy:
+            pred = np.array(
+                gp.evaluate2(
+                    ind,
+                    x_data,
+                    variable_names=[f'x{i}' for i in range(x_data.shape[1])]
+                )
+            )
+            errors[ind] = (pred - y_true) ** 2  # squared‐error on each sample
+
+
+        # ---- PHASE 3: Generate Offspring ----
+        new_offspring = []
+        attempts = 0
+        max_attempts = offspring_size * 3
+
+        while len(new_offspring) < offspring_size and attempts < max_attempts:
+            attempts += 1
+
+            # Select parents via lexicase
+            parent1 = lexicase_select(population_copy, errors)
+
             if np.random.rand() < CROSSOVER_PROB:
-                # Crossover operation
-                parent2 = tournament_select(population, gen)
+                # Crossover
+                parent2 = lexicase_select(population_copy, errors)
                 child1, child2 = growth_enhanced_crossover(parent1, parent2, gen)
-                
-                # Validate children
-                child1 = validate_and_fix_tree(child1)
-                child2 = validate_and_fix_tree(child2)
-                
-                # Apply semantic check and additional mutation if needed
+
+                # Semantic‐repair if too similar
                 if semantic_distance(child1, parent1, x_data) < MIN_SEMANTIC_THRESHOLD:
                     child1 = enhanced_mutate(child1, gp, gen)
-                    child1 = validate_and_fix_tree(child1)
-                    
-                new_offspring.append(child1)
-                
-                # Add second child if space allows
-                if len(new_offspring) < offspring_size:
-                    if semantic_distance(child2, parent2, x_data) < MIN_SEMANTIC_THRESHOLD:
-                        child2 = enhanced_mutate(child2, gp, gen)
-                        child2 = validate_and_fix_tree(child2)
-                    new_offspring.append(child2)
+                if semantic_distance(child2, parent2, x_data) < MIN_SEMANTIC_THRESHOLD:
+                    child2 = enhanced_mutate(child2, gp, gen)
+
+                new_offspring.extend([child1, child2])
             else:
-                # Mutation operation
+                # Mutation only
                 mutant = enhanced_mutate(parent1, gp, gen)
-                mutant = validate_and_fix_tree(mutant)
-                
-                # Check semantic difference and possibly mutate again
-                if semantic_distance(mutant, parent1, x_data) < MIN_SEMANTIC_THRESHOLD:
+                mutation_attempts = 0
+                while (semantic_distance(mutant, parent1, x_data) < MIN_SEMANTIC_THRESHOLD
+                    and mutation_attempts < 3):
                     mutant = enhanced_mutate(mutant, gp, gen)
-                    mutant = validate_and_fix_tree(mutant)
-                    
+                    mutation_attempts += 1
+
                 new_offspring.append(mutant)
-                
-            # Stop after generating enough offspring
-            if len(new_offspring) >= offspring_size:
-                break
+
+        # Trim to exact offspring size
+        new_offspring = new_offspring[:offspring_size]
         
-        # ---- PHASE 3: Evaluate Offspring ----
+        # ---- PHASE 4: Evaluate Offspring with Population Statistics ----
         for ind in new_offspring:
-            ind.fitness = unified_compute_fitness(ind, gen)
+            ind.fitness = unified_compute_fitness(ind, gen, pop_stats)
         
-        # ---- PHASE 4: Selection with Size Diversity Preservation ----
-        population.extend(new_offspring)
+        # ---- PHASE 5: Selection ----
+        # Combine populations
+        combined_pop = population_copy + new_offspring
+        # keep exactly POP_SIZE individuals, balancing fitness vs. complexity
+        population_copy = nsga2_parent_selection(
+            combined_pop,
+            num_parents=POP_SIZE,
+            generation=gen,
+            pop_stats=pop_stats
+        )
+
+        # Ensure population sorted by fitness for stats
+        population_copy.sort(key=lambda ind: ind.fitness, reverse=True)
         
-        # Selection strategy
-        if gen > NUM_GENS * 0.3 and np.random.rand() < 0.3:
-            # Occasionally preserve some large trees to maintain structural diversity
-            population.sort(key=lambda ind: ind.fitness, reverse=True)
-            selected = population[:int(POP_SIZE * 0.9)]
-            remaining = population[int(POP_SIZE * 0.9):]
-            largest_trees = sorted(remaining, key=lambda ind: len(collect_nodes(ind)), reverse=True)
-            selected.extend(largest_trees[:POP_SIZE - len(selected)])
-            population = selected
-        else:
-            # Standard selection by fitness
-            population = sorted(population, key=lambda ind: ind.fitness, reverse=True)[:POP_SIZE]
+        # ---- PHASE 6: Compute Statistics ----
+        best_ind = population_copy[0]
+        best_fitness = best_ind.fitness
+        avg_fitness = np.mean([ind.fitness for ind in population_copy])
+        best_complexity = len(collect_nodes(best_ind))
         
-        # ---- PHASE 5: Compute Statistics ----
-        best_fitness = population[0].fitness
-        avg_fitness = np.mean([ind.fitness for ind in population])
-        best_complexity = len(collect_nodes(population[0]))
-        current_max_size = max(len(collect_nodes(ind)) for ind in population)
-        diversity = calculate_population_diversity(population, sample_size=min(20, len(population)))
+        sizes = [len(collect_nodes(ind)) for ind in population_copy]
+        current_max_size = max(sizes)
+        current_avg_size = np.mean(sizes)
+        
+        diversity = calculate_population_diversity(population_copy, sample_size=min(30, POP_SIZE))
         
         # Update history
         history['best_fitness'].append(best_fitness)
         history['avg_fitness'].append(avg_fitness)
         history['complexity'].append(best_complexity)
         history['diversity'].append(diversity)
+        history['best_mse'].append(pop_stats['best_mse'])
+        history['avg_mse'].append(pop_stats['avg_mse'])
         
-        # ---- PHASE 6: Stagnation Detection and Response ----
+        # ---- PHASE 7: Stagnation Detection ----
+        # For negative fitness, improvement means more positive (closer to 0)
+        fitness_improved = best_fitness > state['last_best_fitness'] + 1e-6
         
-        # Check fitness stagnation
-        if best_fitness <= state['last_best_fitness'] + 1e-6:
+        if not fitness_improved:
             state['stagnation_counter'] += 1
         else:
             state['stagnation_counter'] = 0
             state['last_best_fitness'] = best_fitness
         
-        # Check growth stagnation
+        # Size stagnation
         if current_max_size <= state['max_size_seen']:
             state['growth_stagnation'] += 1
         else:
             state['growth_stagnation'] = 0
             state['max_size_seen'] = current_max_size
         
-        # ---- PHASE 7: Adaptive Control Mechanisms ----
-        
-        # Control size explosion if trees are growing too fast without fitness improvement
-        if (current_max_size > 50 and state['stagnation_counter'] > 15) or current_max_size > 100:
-            old_penalty = LENGTH_PENALTY
-            LENGTH_PENALTY = old_penalty * 2
-            tqdm.write(f"Generation {gen}: Controlling bloat. Increasing penalty temporarily from {old_penalty:.6f} to {LENGTH_PENALTY:.6f}")
-            for ind in population:
-                ind.fitness = unified_compute_fitness(ind, gen)
-            if gen > 3:
-                LENGTH_PENALTY = old_penalty
-                
-        # Accelerate growth when trees are too small
-        if gen > 10 and state['max_size_seen'] < 15 and state['growth_stagnation'] > 5:
-            old_penalty = LENGTH_PENALTY
-            LENGTH_PENALTY = old_penalty * 0.1
-            tqdm.write(f"Generation {gen}: Trees too small. Drastically reducing complexity penalty from {old_penalty:.6f} to {LENGTH_PENALTY:.6f}")
-            
-            # Inject larger trees into population
-            num_large_trees = POP_SIZE // 10
-            for _ in range(num_large_trees):
-                size = np.random.randint(15, 25)
-                new_ind = gp.create_individual(size)
-                new_ind.fitness = unified_compute_fitness(new_ind, gen)
-                
-                # Replace individuals from the bottom half of the population
-                bottom_half = sorted(population, key=lambda ind: ind.fitness)[:POP_SIZE // 2]
-                to_replace = np.random.choice(bottom_half)
-                idx = population.index(to_replace)
-                population[idx] = new_ind
-                
-            state['growth_stagnation'] = 0
-        
-        """# ---- PHASE 8: Special Solution Detection ----
-        #used at the beginning of the project, in the problem 1 to see if i got the right solution
-        best_formula = population[0].long_name.lower()
+        # ---- PHASE 8: Special Solution Detection ----
+        best_formula = best_ind.long_name.lower()
         if not state['found_special_solution']:
             if "sin(x0)" in best_formula or "custom_sin(x0)" in best_formula:
                 state['found_special_solution'] = True
                 state['special_solution_gen'] = gen
-                state['best_formula_found'] = "sin(x0)"
-                tqdm.write(f"Found sin(x0) at generation {gen}!")"""
+                state['best_formula_found'] = best_formula
+                tqdm.write(f"Found special solution at generation {gen}: {best_formula}")
         
         # ---- PHASE 9: Logging ----
-        if gen % 5 == 0 or gen == NUM_GENS - 1:
-            current_sizes = [len(collect_nodes(ind)) for ind in population]
-            tqdm.write(f"Generation {gen}: Best Fitness = {best_fitness:.6f}, Avg Fitness = {avg_fitness:.6f}")
-            tqdm.write(f"Tree sizes: Min = {min(current_sizes)}, Avg = {sum(current_sizes)/len(current_sizes):.1f}, Max = {max(current_sizes)}")
-            tqdm.write(f"Best complexity: {best_complexity}, Diversity: {diversity:.2f}")
-            tqdm.write(f"Best formula: {population[0].long_name}")
+        if gen % 2 == 0 or gen == NUM_GENS - 1:
+            tqdm.write(f"\nGeneration {gen}:")
+            tqdm.write(f"  Best Fitness: {best_fitness:.6f}")
+            tqdm.write(f"  Best MSE: {pop_stats['best_mse']:.6e}")
+            tqdm.write(f"  Avg MSE: {pop_stats['avg_mse']:.6e}")
+            tqdm.write(f"  Tree sizes - Min: {min(sizes)}, Avg: {current_avg_size:.1f}, Max: {current_max_size}")
+            tqdm.write(f"  Diversity: {diversity:.3f}")
+            tqdm.write(f"  Best Formula: {best_ind.long_name}")  # full formula shown
+            
+            #new addition
+            best_ind.draw()
     
-    return (population, history['best_fitness'], history['avg_fitness'], 
+    return (population_copy, history['best_fitness'], history['avg_fitness'], 
             history['complexity'], history['diversity'], state['found_special_solution'], 
             state['special_solution_gen'], state['best_formula_found'])
+
+
+
+
+
+
+def unified_compute_fitness_with_penalty(ind, generation, penalty_factor):
+    """
+    Compute fitness with a specific penalty factor instead of using global.
+    """
+    #ind = validate_and_fix_tree(ind)
+    
+    try:
+        pred = gp.evaluate2(ind, x_data, variable_names=[f'x{i}' for i in range(x_data.shape[1])])
+        pred = np.array(pred)
+        
+        if np.any(np.isnan(pred)) or np.any(np.isinf(pred)):
+            return -1e30
+        
+        mse_val = np.mean((pred - y_true) ** 2)
+        complexity = len(collect_nodes(ind))
+        
+        # Use passed penalty factor instead of global
+        penalty_weight = penalty_factor * max(0.1, 1.0 - generation / NUM_GENS)
+        total_penalty = penalty_weight * complexity
+        
+        fitness = -(mse_val + total_penalty)
+        return fitness
+        
+    except Exception as e:
+        return -1e30
 
 ```
 
 
 ## `run_streamlined_evolution`: A Detailed Walkthrough
 
-This high-level function orchestrates the entire Genetic Programming (GP) run, integrating adaptive mechanisms for diversity, size control, stagnation detection, and special-solution monitoring. Below we break down its objectives and behavior step by step.
+This function orchestrates the full symbolic regression run using Genetic Programming (GP). It integrates adaptive mechanisms for diversity preservation, semantic novelty checks, stagnation detection, and special-solution monitoring. Below we break down its structure and behaviour step by step.
 
 ---
 
 ### 1. Initialization & State Tracking
 
-- **Global Adjustment**  
-  - Reads and potentially modifies the global `LENGTH_PENALTY` to throttle complexity costs on the fly.
 - **History Dictionary**  
-  - `best_fitness`, `avg_fitness`, `complexity`, `diversity`: lists to record the population’s performance, structural size, and semantic variety at each generation.
+  Records key metrics across generations:  
+  - `best_fitness`, `avg_fitness` → performance curves  
+  - `complexity` → structural size of best individual  
+  - `diversity` → semantic spread in population  
+  - `best_mse`, `avg_mse` → error metrics for analysis  
+
 - **State Dictionary**  
-  - **Stagnation Counters**  
-    - `stagnation_counter`: counts consecutive generations without fitness improvement.  
-    - `growth_stagnation`: counts generations without increase in maximum tree size.  
-  - **Size Metrics**  
-    - `max_size_seen`: remembers the largest tree size encountered so far.  
-  - **Special Solution Flags**  
-    - `found_special_solution`, `special_solution_gen`, `best_formula_found`: used to detect and record if a target pattern (e.g., `sin(x0)`) emerges.
+  Tracks the algorithm’s health:  
+  - `stagnation_counter` → consecutive generations without fitness improvement  
+  - `last_best_fitness` → most recent best score  
+  - `growth_stagnation` → consecutive gens without size growth  
+  - `max_size_seen` → largest tree so far  
+  - `found_special_solution`, `special_solution_gen`, `best_formula_found` → flags for detecting known formulas (e.g., `sin(x0)`)  
 
-Initially, the existing `population` is sorted by fitness so that the fittest individuals are always first.
-
-The `special solution` were used at the start of the project, in problem 1, to see if i got the sin(x0) that is the optimal solution for that problem, to understand if my algorithm was working correctly
-
+- **Initial Evaluation**  
+  Each individual is scored with `unified_compute_fitness`. The population is then sorted by fitness.
 
 ---
 
 ### 2. Main Evolutionary Loop
 
-Iterates `NUM_GENS` times. Each generation proceeds through nine distinct phases:
+The loop runs for `NUM_GENS` generations, structured into nine phases.
 
 ---
 
-#### Phase 1: Diversity & Offspring Budgeting
+#### Phase 0: Update Population Statistics
 
-1. **Diversity Injection**  
-   - Calls `enhanced_diversity_injection` to introduce new, potentially larger or structurally novel individuals when semantic diversity falls below a generation-adaptive threshold or when trees remain too small halfway through the run.
-2. **Dynamic Offspring Count**  
-   - Base offspring count is `OFFSPRING_NUM`.  
-   - If fitness hasn’t improved for >10 generations, offspring are multiplied by 1.5 to boost exploration.  
-   - If tree size hasn’t grown for >8 generations, offspring are further increased by 20%.  
-   - Messages are logged via `tqdm.write` to explain increases.
+- Compute per-individual MSE and tree size.  
+- Update `pop_stats` with current `best_mse`, `avg_mse`, and `avg_size`.  
+- These stats guide adaptive penalties in `unified_compute_fitness`.
 
 ---
 
-#### Phase 2: Offspring Generation
+#### Phase 1: Adaptive Offspring Size
 
-- **Loop until Desired Offspring Count**  
-  - **Parent Selection**: first parent via `tournament_select`.  
-  - **Recombination vs. Mutation**  
-    - With probability `CROSSOVER_PROB`, performs `growth_enhanced_crossover` between two tournament-selected parents.  
-      - Children are validated (`validate_and_fix_tree`).  
-      - If a child’s semantics differ too little from its parent (`semantic_distance < MIN_SEMANTIC_THRESHOLD`), it receives an extra `enhanced_mutate` pass.  
-      - Both children are appended, as long as room remains.  
-    - Otherwise, applies a single `enhanced_mutate` to the parent, again ensuring semantic novelty via re-mutation if needed.
-
-This design blends exploitation (crossover) with exploration (mutation), with semantic checks guarding against “neutral” edits.
+- Base offspring count = `OFFSPRING_NUM`.  
+- If stagnation > 10 gens → offspring ×1.5 (up to `POP_SIZE`).  
+- If growth stagnation > 8 gens → offspring ×1.2.  
+- Expands search when exploration stalls.
 
 ---
 
-#### Phase 3: Offspring Evaluation
+#### Phase 2: Diversity Injection
 
-Each newly created individual has its fitness recomputed via `unified_compute_fitness`, incorporating MSE and an adaptive complexity penalty.
-
----
-
-#### Phase 4: Population Selection
-
-- **Combine & Cull**  
-  - The current population and new offspring are concatenated.  
-- **Size-Diverse Selection (30% chance after 30% of generations)**  
-  - Retain the top 90% by fitness.  
-  - From the remainder, promote the largest trees to fill out the population, preserving structural diversity.  
-- **Standard Selection**  
-  - Otherwise, simply keep the top `POP_SIZE` individuals by fitness.
-
-This mixture ensures that occasional “big but untried” structures survive to challenge the status quo.
+- Calls `enhanced_diversity_injection` to replace converged/undersized trees.  
+- Injection reasons:  
+  - **Low diversity** → population semantically too similar.  
+  - **Small trees** → structural undergrowth late in evolution.  
 
 ---
 
-#### Phase 5: Statistics & Logging
+#### Phase 3: Build Error Profiles
 
-- **Compute Metrics**  
-  - `best_fitness`, `avg_fitness`, `best_complexity` (node count of the best individual), `current_max_size`, and semantic `diversity`.  
-- **Update History**  
-  - Appended to the respective history lists for post-run analysis.  
-- **Periodic Logging**  
-  - Every 5 generations (and at the final generation), prints detailed summaries: fitness statistics, tree-size distribution, diversity, and the current best formula.
+- For each individual, compute per-sample squared error.  
+- Stored in `errors` dict for use in lexicase selection.  
 
 ---
 
-#### Phase 6: Stagnation Detection
+#### Phase 4: Offspring Generation
 
-- **Fitness Stagnation**  
-  - If the best fitness fails to exceed its previous value by more than 1e-6, increment `stagnation_counter`; otherwise reset and update `last_best_fitness`.
-- **Growth Stagnation**  
-  - Similarly tracks if `current_max_size` fails to surpass `max_size_seen`.
-
-These counters drive adaptive responses in later phases.
-
----
-
-#### Phase 7: Adaptive Complexity Control
-
-- **Bloat Control**  
-  - If trees exceed 50 nodes with fitness stagnation >15 generations—or any tree exceeds 100 nodes—the per-node penalty (`LENGTH_PENALTY`) is temporarily doubled.  
-  - All fitnesses are re-evaluated under the higher penalty to discourage unnecessary growth.  
-  - Reverts after one generation if the run is sufficiently advanced.
-- **Growth Acceleration**  
-  - If, after generation 10, the largest tree is still under 15 nodes and growth has stalled >5 generations, the penalty is slashed to 10% of its normal value.  
-  - Simultaneously injects a batch of large (size 15–25) fresh individuals into the bottom half of the population to jump-start complexity.
-
-These countermeasures automatically balance parsimony against necessary complexity.
+- Loop until `offspring_size` reached (with attempt cap).  
+- **Parent selection**: `lexicase_select`.  
+- **Variation**:  
+  - With `CROSSOVER_PROB`: do `growth_enhanced_crossover`.  
+    - If children too semantically similar to parents → apply `enhanced_mutate`.  
+  - Else: mutation only.  
+    - Retry up to 3 times if semantics remain too close.  
+- Ensures children are **novel**, not clones.
 
 ---
 
-#### Phase 8: Special-Solution Detection
+#### Phase 5: Evaluate Offspring
 
-Monitors the best individual’s expression (`long_name`) for a target pattern (e.g., `sin(x0)`), flags its discovery, and logs the generation when it first appears.
-This was used at the start of the project development, to understand in problem 1 if i was finding the best solution, was commented later because it's basically useless
+- Each child gets `fitness = unified_compute_fitness(...)` using current `pop_stats`.  
+- Couples error accuracy with adaptive complexity control.
 
 ---
 
-#### Phase 9: Logging & Finalization
+#### Phase 6: NSGA-II Selection
 
-- Prints generation milestones (every 5 gens and at the end) summarizing the run’s state.  
-- After the loop, returns a tuple containing:  
-  1. Final `population`  
-  2. Lists of `best_fitness`, `avg_fitness`, `complexity`, `diversity`  
-  3. `found_special_solution` flag  
-  4. `special_solution_gen`, and  
-  5. `best_formula_found`
+- Merge parents + offspring.  
+- Apply `nsga2_parent_selection`:  
+  - Objectives = `(-fitness, complexity)` (minimization).  
+  - Uses Pareto fronts + crowding distance.  
+- Ensures survival of both accurate and parsimonious solutions.
+
+---
+
+#### Phase 7: Compute Statistics
+
+- Extract best individual and recompute:  
+  - `best_fitness`, `avg_fitness`  
+  - `best_complexity` and population size distribution  
+  - `diversity` (semantic distance score)  
+- Append metrics to history arrays for plotting.
+
+---
+
+#### Phase 8: Stagnation Detection
+
+- **Fitness stagnation**: if best doesn’t improve >1e-6, increment counter.  
+- **Growth stagnation**: if max tree size fails to increase, increment growth counter.  
+- Triggers adaptive offspring scaling.
+
+---
+
+#### Phase 9: Special-Solution Detection
+
+- Inspect `best_ind.long_name` for known target forms like `sin(x0)`.  
+- If found, record generation and print discovery message.  
+- Originally a debugging tool in early project phases (problem 1).
+
+---
+
+#### Phase 10: Logging
+
+- Every 2 generations (and final one):  
+  - Print best fitness, best/avg MSE, tree sizes, diversity, and best formula.  
+  - Call `best_ind.draw()` to visualize the current champion.
+
+---
+
+### 3. Return Values
+
+At the end, returns:  
+1. Final `population`  
+2. Histories of `best_fitness`, `avg_fitness`, `complexity`, `diversity`  
+3. `found_special_solution` flag  
+4. `special_solution_gen`  
+5. `best_formula_found`
 
 ---
 
 ### Overall Objectives & Design Principles
 
-1. **Adaptive Exploration**  
-   - Dynamically varying offspring count, mutation/crossover pressure, and diversity injections based on stagnation signals.
-2. **Balanced Parity of Fitness vs. Complexity**  
-   - Complexity penalties rise and fall to prevent both premature bloat and underfitting.
-3. **Semantic Guards**  
-   - Ensures offspring meaningfully differ from parents, avoiding wasted evaluations on neutral mutations.
-4. **Diversity Preservation**  
-   - Injects novel structures and occasionally preserves large trees to maintain a rich search space.
-5. **Automated Milestone Detection**  
-   - Watches for emergence of known-in-advance solutions to track algorithmic breakthroughs.
+1. **Adaptive Exploration** – offspring counts and injections respond to stagnation.  
+2. **Balanced Objectives** – NSGA-II jointly optimizes accuracy and parsimony.  
+3. **Semantic Novelty** – prevents wasted evaluations on near-clones.  
+4. **Diversity Preservation** – injects novelty when population converges.  
+5. **Diagnostics** – records all major signals for post-run analysis, with optional special-solution detection.
 
-This deeply instrumented, phase-structured evolution loop leverages statistical feedback to steer GP towards accurate, robust, and appropriately complex symbolic models.  
+This loop is the **engine of the project**, integrating fitness evaluation, novelty checks, and adaptive heuristics to produce robust symbolic models.  
+
+
+
+- **`unified_compute_fitness_with_penalty(ind, generation, penalty_factor)`**  
+  Alternative fitness evaluator with explicit, user-controlled complexity penalty.  
+  - **Process**:  
+    1. Evaluates predictions of `ind` against `y_true` with `gp.evaluate2`.  
+    2. Computes **mean squared error (MSE)**.  
+    3. Calculates **complexity** as number of nodes in the tree.  
+    4. Scales penalty as `penalty_factor * (1 – generation/NUM_GENS)` → penalty is stronger early, weaker late.  
+    5. Fitness = `-(MSE + penalty_weight * complexity)`.  
+    6. Returns `-1e30` if evaluation fails (`NaN`/`Inf`).  
+  - **Differences vs. `unified_compute_fitness`**:  
+    - Does not use adaptive population-level stats (e.g. `avg_mse`, `avg_size`).  
+    - Instead applies a **fixed penalty factor** supplied by the user.  
+  - **Use in project**: useful for controlled experiments on **parsimony pressure**, ablation studies, or debugging. Lets you directly test how different penalty strengths affect solution size vs. accuracy trade-offs.
+
 
 
 ---
@@ -2559,7 +3032,9 @@ This deeply instrumented, phase-structured evolution loop leverages statistical 
 
 ```python
 def main():
-    
+    """
+    Main function to run the genetic programming algorithm.
+    """
     # Set random seed for reproducibility
     np.random.seed(42)
     
@@ -2569,7 +3044,12 @@ def main():
     # Initialize operators and GP system
     print("Initializing GP system...")
     global gp, population
-    
+    # Initialize the GP system
+    """gp = DagGP(
+        operators=operators,
+        variables=x_data.shape[1],
+        constants=np.linspace(-5, 5, 500)
+    )"""
     
     # Initialize population with diverse individuals
     print("Initializing population...")
@@ -2582,7 +3062,26 @@ def main():
         ind.fitness = unified_compute_fitness(ind)
         population.append(ind)
     
+    # Try to include specialized solutions
+    print("Adding specialized solutions to population...")
+    valid_solutions = []
+    special_solutions = try_create_special_solutions()
     
+    for solution in special_solutions:
+        try:
+            _ = gp.evaluate2(solution, x_data[:1], variable_names=[f'x{i}' for i in range(x_data.shape[1])])
+            solution.fitness = unified_compute_fitness(solution)
+            valid_solutions.append(solution)
+        except Exception as e:
+            print(f"Error evaluating solution: {e}")
+    
+    # Add valid solutions to the population
+    for solution in valid_solutions:
+        if len(population) >= POP_SIZE:
+            lower_half = sorted(population, key=lambda ind: ind.fitness)[:POP_SIZE // 2]
+            to_replace = np.random.choice(lower_half)
+            population.remove(to_replace)
+        population.append(solution)
     
     print(f"Initial population size: {len(population)}")
     
@@ -2647,7 +3146,7 @@ def main():
     print("\nBest formula:", best_individual.long_name)
     
     # Compare Model Prediction vs Ground Truth
-    predicted = gp.evaluate(best_individual, x_data, 
+    predicted = gp.evaluate2(best_individual, x_data, 
                             variable_names=[f'x{i}' for i in range(x_data.shape[1])])
     plt.figure(figsize=(12, 6))
     plt.plot(predicted, label="GP Prediction", color="blue")
@@ -2672,7 +3171,7 @@ def main():
     y_validation = y_true[split_index:]
     
     def evaluate_best(x):
-        return gp.evaluate(best_individual, x, variable_names=[f'x{i}' for i in range(x.shape[1])])
+        return gp.evaluate2(best_individual, x, variable_names=[f'x{i}' for i in range(x.shape[1])])
     
     pred_train = evaluate_best(x_train)
     pred_validation = evaluate_best(x_validation)
@@ -2704,135 +3203,115 @@ if __name__ == "__main__":
 
 
 
-## `main()`: End-to-End Orchestration of the Genetic Programming Run
+## `main`: Execution Pipeline
 
-The `main()` function encapsulates the complete workflow—from seeding randomness through data confirmation, population initialization, evolutionary execution, to final reporting and persistence. Below is a structured description of each phase and its objectives.
-
----
-
-### 1. Reproducibility & Startup Logging  
-- **`np.random.seed(42)`**  
-  Fixes NumPy’s random number generator so that every run with the same inputs yields identical initial populations, mutation draws, and crossover points.  
-- **Console Output**  
-  Prints which problem dataset is being loaded (`selected_problem`) and the shapes of `x_data` (input matrix) and `y_true` (target vector). This immediate feedback confirms that data have been loaded correctly and reminds the user of dimensionalities.
+This function is the **entry point** of the project. It sets up the GP system, runs the evolutionary algorithm, and produces both visual and textual outputs of the best solution found.
 
 ---
 
-### 2. GP Engine Initialization  
-- **Placeholder Print**  
-  Outputs “Initializing GP system…”, signaling to the user that the genetic programming engine (the `DagGP` instance and its operator/constant configuration) should already be in place.  
-- **Global Declarations**  
-  Marks `gp` and `population` as global variables, ensuring that subsequent calls (e.g., to `run_streamlined_evolution`) refer to this same GP instance and population list.
+### 1. Setup
+
+- **Random Seed**  
+  - Fixes NumPy’s seed (`42`) to ensure reproducible runs.
+
+- **Problem Loading**  
+  - Prints problem ID and dataset shapes (`x_data`, `y_true`).
+
+- **System Initialization**  
+  - Prepares the GP system (`gp`) and creates an initial **population** of size `POP_SIZE`.  
+  - Each individual is generated with a random size between `INITIAL_SIZE_MIN` and `INITIAL_SIZE_MAX` and evaluated with `unified_compute_fitness`.
 
 ---
 
-### 3. Population Seeding  
-- **Diverse Initial Sizes**  
-  Iterates `POP_SIZE` times, each time drawing a random tree size uniformly between `INITIAL_SIZE_MIN` and `INITIAL_SIZE_MAX`.  
-- **Individual Creation & Fitness Assignment**  
-  For each random size, calls `gp.create_individual(size)` to generate a new expression tree, immediately evaluates it via `unified_compute_fitness()` (incorporating MSE + complexity penalty), and appends it to the `population` list.  
-- **Progress Print**  
-  Reports the total number of individuals initialized, which should equal `POP_SIZE`.
+### 2. Specialized Seeding
+
+- Calls `try_create_special_solutions()` to generate handcrafted individuals (e.g. `sin(x0)`).  
+- Evaluates and validates these candidates.  
+- Injects them into the population by replacing weak individuals (bottom half), ensuring diversity and testing baseline expressions.
 
 ---
 
-### 4. Launching Evolution  
-- **Signal Start**  
-  Prints “Starting evolutionary process…” to distinguish between setup and the main compute-intensive loop.  
-- **Delegation**  
-  Calls `run_streamlined_evolution()`, passing control of selection, crossover, mutation, diversity injection, stagnation handling, and special-solution detection to that modular function.  
-- **Captured Outputs**  
-  Receives back:  
-  1. `final_population` (the post-evolution individuals)  
-  2. Time series lists (`best_fitness_history`, `avg_fitness_history`, `complexity_history`, `diversity_history`) for plotting  
-  3. Flags and metadata about any “special” formula discovered (`found_special_solution`, `special_solution_gen`, `best_formula_found`).
+### 3. Run Evolution
+
+- Calls **`run_streamlined_evolution()`**, which handles the entire GP process.  
+- Captures outputs:  
+  - Final population  
+  - Fitness and diversity histories  
+  - Special-solution detection flags
 
 ---
 
-### 5. Visualizing Convergence & Structure  
-- **Plot Setup**  
-  Creates a 3×1 figure with generous size for readability.  
-- **Fitness Evolution**  
-  - Plots the best‐ever fitness per generation.  
-  - If a target solution was detected, marks that generation with a vertical line and label.  
-- **Complexity Trajectory**  
-  Plots the node count of the best individual over time, revealing growth patterns and bloat control effects.  
-- **Semantic Diversity**  
-  Plots the population’s diversity score each generation, illustrating exploration vs. convergence phases.  
-- **Persistence & Display**  
-  Saves the composite figure as `evolution_problem_{selected_problem}.png` and displays it.
+### 4. Post-Run Analysis & Visualization
+
+- **Plots** (saved as `.png`):  
+  - Fitness over generations (`best_fitness`, `avg_fitness`, markers for special solutions).  
+  - Complexity of best individual (nodes).  
+  - Semantic diversity of the population.  
+
+- **Best Individual Tree**  
+  - Uses `draw()` to visualize and save the final GP expression tree.  
+
+- **Formula & Prediction Plot**  
+  - Prints the formula string.  
+  - Compares predicted outputs vs. ground truth across all data points.  
+  - Saves prediction plot for inspection.
 
 ---
 
-### 6. Inspecting the Best Individual  
-- **Tree Diagram**  
-  Attempts to draw the best individual’s expression tree via `best_individual.draw()`. If successful, saves the plot to `best_tree_problem_{selected_problem}.png`. If drawing fails, logs the exception but continues.  
-- **Formula Output**  
-  Prints the human‐readable expression (`best_individual.long_name`) of the top individual.
+### 5. Evaluation Metrics
+
+- **Global MSE**: computed on the full dataset.  
+- **Train/Validation Split** (80/20):  
+  - Evaluates MSE separately on training and validation subsets.  
+  - Prints results in the same format as the teacher’s reference style.  
 
 ---
 
-### 7. Prediction vs. Ground Truth  
-- **Full‐Dataset Evaluation**  
-  Runs `gp.evaluate(best_individual, x_data, variable_names=[…])` to compute predictions for every input sample.  
-- **Overlay Plot**  
-  - Plots predictions (solid blue) and true outputs (dashed red) on the same axes.  
-  - Saves as `prediction_problem_{selected_problem}.png` and displays.  
-- **MSE Computation**  
-  Calculates and prints the mean squared error on the full dataset to quantify overall model accuracy.
+### 6. Save Results
 
----
-
-### 8. Train/Validation Split & Metrics  
-- **80/20 Split**  
-  Divides `x_data` and `y_true` into training (first 80%) and validation (remaining 20%) subsets.  
-- **Subset Evaluation**  
-  Evaluates the best individual on both sets.  
-- **Teacher‐Style MSE**  
-  Computes and prints scaled MSE values (`100 * sum((y − ŷ)²) / N`) for training and validation, facilitating comparison to any pedagogical benchmarks or grading schemes.
-
----
-
-### 9. Results Persistence  
-- **Text File Output**  
-  Writes a summary to `solution_problem_{selected_problem}.txt`, including:  
+- Writes results to `solution_problem_{id}.txt`:  
   - Best formula  
-  - Training and validation MSE  
-  - Model complexity (node count)  
+  - Train and validation MSE  
+  - Complexity (node count)  
   - Final fitness  
-  - If applicable, the generation where a special solution was found.  
-- **Final Confirmation**  
-  Prints “Results saved to files.” to signal completion of all reporting tasks.
+  - Special solution discovery info (if applicable)  
 
 ---
 
-### 10. Entrypoint Guard  
-- **`if __name__ == "__main__":`**  
-  Ensures that `main()` runs only when the script is executed directly, not when imported as a module.  
-- **Return Value**  
-  Captures `best_solution` (the best individual) for potential downstream use or inspection.
+### 7. Return Value
+
+- Returns the **best individual** found.  
+- When executed as `__main__`, assigns it to `best_solution`.
 
 ---
 
-**Summary:**  
-The `main()` function delivers a reproducible, transparent, and comprehensive pipeline for symbolic regression via Genetic Programming. It handles randomness control, population initialization, delegation to a robust evolutionary core, rich visualization of performance and structure, rigorous evaluation on held-out data, and automated saving of both graphical and textual artifacts—making it ideally suited for inclusion in a university‐level project report.  
+### Role in the Project
+
+- Provides a **complete, end-to-end pipeline**:  
+  1. Initialize GP system.  
+  2. Seed population (random + handcrafted).  
+  3. Run adaptive evolution.  
+  4. Record and visualize progress.  
+  5. Evaluate and save final results.  
+
+It is the **driver function** that ties together all components: initialization, evolution, evaluation, and reporting.  
 
 
 ---
 
 # RESULTS
 
-| Problem | Population Size | Generations | Formula                          |  Offspring Num | Init Size Min | Init Size Max | Tournament Size | MSE x 100      |
+| Problem | Population Size | Generations | Formula                          |  Offspring Num | Init Size Min | Init Size Max | Tournament Size | MSE     |
 |---------|------------------|-------------|----------------------------------|---------|----------------|----------------|----------------|------------------|
-| 0     | 5000              | 200         |  add(x[0], mul(0.182591, min_op(x[1], 0.882941)))    | 1500                  | 1            | 25               | 250              |     0.0018137                           |
+| 0     | 5000              | 200         |  add(x[0], mul(0.182591, min_op(x[1], 0.882941)))    | 1500                  | 1            | 25               | 250              |     1.8137e-05   |
 | 1       | 50              | 10          | custom_sin(x[0])                | 75        | 1             | 25              | 12              | 7.12594e-32                |
-| 2       | 300                        | 200                   | safe_div(leaky_relu(leaky_relu(average(min_op(add(min_op(add(add(add(x[1], x[0]), x[0]), min_op(add(cube(safe_pow(safe_log(max_op(sub(1.47295, x[0]), 4.85972)), logit(triangle_wave(x[0])))), x[2]), min_op(max_op(add(triangle_wave(x[0]), x[2]), safe_pow(4.77956, -0.711423)), custom_exp(logit(safe_pow(logit(safe_pow(1.79359, elu(4.33868, mod(x[1], 3.65731)))), safe_pow(1.79359, elu(4.33868, mod(x[1], 3.65731))))))))), min_op(add(cube(x[0]), x[2]), min_op(max_op(leaky_relu(gaussian(4.61924), sub(x[1], triangle_wave(-2.89579))), 4.85972), 3.85772))), min_op(add(add(x[1], x[0]), x[2]), min_op(add(x[1], x[0]), sub(x[1], -3.998)))), cube(relu(safe_log(mul(4.65932, square_wave(safe_pow(triangle_wave(x[0]), relu(sinc(sub(1.47295, x[0])))))))))), 4.65932), relu(safe_log(sub(logit(elu(x[1], 2.39479)), add(add(add(x[1], x[0]), x[0]), min_op(add(cube(safe_pow(safe_log(max_op(sub(1.47295, x[0]), 4.85972)), logit(triangle_wave(x[0])))), x[2]), min_op(max_op(logit(x[2]), safe_pow(4.77956, -0.711423)), custom_exp(logit(safe_pow(logit(safe_pow(1.79359, elu(cube(x[0]), mod(x[1], 3.65731)))), safe_pow(1.79359, elu(4.33868, mod(x[1], 3.65731))))))))))))), relu(sinc(leaky_relu(x[0], 0.831663)))), mul(bent_identity(leaky_relu(gaussian(4.61924), sub(logit(elu(x[1], 2.39479)), triangle_wave(-2.89579)))), sub(triangle_wave(safe_pow(x[1], -4.23848)), leaky_relu(logit(elu(x[1], sinc(sub(1.47295, x[0])))), sub(logit(elu(x[1], 2.39479)), add(add(add(x[1], x[0]), x[0]), min_op(add(cube(safe_pow(safe_log(max_op(sub(1.47295, x[0]), 4.85972)), logit(triangle_wave(x[0])))), x[2]), min_op(max_op(logit(x[2]), safe_pow(4.77956, -0.711423)), custom_exp(logit(triangle_wave(x[0])))))))))))         | 75        | 1             | 25              | 12              | 1.90401e+15                |
-| 3       | 2000              | 100          | add(sub(square(mul(-1.12306, x[0])), cube(x[1])), square(min_op(add(safe_sqrt(x[2]), min_op(-1.95848, x[0])), min_op(min_op(x[2], add(x[2], min_op(add(safe_sqrt(x[2]), min_op(-1.95848, x[0])), sub(safe_sqrt(x[2]), x[0])))), sub(safe_sqrt(x[2]), x[0])))))      | 1500  | 1             | 25              | 250              | 7484.06                |
-| 4     | 300                        | 200                  | mul(min_op(min_op(sinc(bent_identity(sub(0.350701, x[1]))), sinc(sub(bent_identity(sub(sinc(sub(leaky_relu(-4.0982, custom_sin(-1.35271)), x[1])), add(x[1], custom_exp(average(min_op(safe_sqrt(3.45691), x[0]), min_op(-4.97996, 2.09419)))))), elu(x[1], x[1])))), sinc(relu(max_op(max_op(bent_identity(min_op(sub(bent_identity(4.65932), elu(x[1], 0.350701)), x[1])), safe_log(-4.0982)), bent_identity(min_op(sub(leaky_relu(max_op(-1.91383, x[1]), custom_sin(elu(safe_div(x[1], average(x[1], 3.65731)), 2.05411))), x[1]), relu(max_op(max_op(sinc(-1.35271), safe_log(-4.0982)), min_op(softsign(x[0]), max_op(average(3.37675, x[0]), x[0])))))))))), bent_identity(bent_identity(bent_identity(4.65932))))                              | 75     | 1            | 25            | 12            | 6.85984              |
-| 5     | 5000                                  | 400                  | relu(-0.771543)                              | 1500           | 1            | 30            | 250            | 1.8845e-17              |
-| 6     | 200              | 200         | add(sub(x[1], x[0]), average(mul(safe_pow(-2.63527, gaussian(2.51503)), x[1]), average(average(x[1], average(x[1], x[0])), x[0])))                              | 75     | 1            | 25            | 12            | 0.00163053              |
-| 7     | 2000              | 100         | mul(elu(leaky_relu(mul(x[0], mul(-4.0045, x[1])), -4.0045), x[1]), average(elu(elu(elu(mul(-3.8044, 4.75988), mul(x[0], mul(x[1], 1.15308))), mul(x[0], triangle_wave(mod(mul(mod(x[1], x[0]), 1.07804), x[0])))), elu(mul(-3.8044, 4.75988), mul(elu(mul(x[0], 4.75988), mul(x[0], triangle_wave(mod(mul(mod(x[1], x[0]), 1.07804), x[0])))), triangle_wave(mod(mul(mod(x[1], -4.0045), 1.07804), x[0]))))), mul(x[0], x[1])))                               | 1500     | 1            | 25            | 250            | 32498.9              |
-| 8     | 200                        | 100         | mul(sub(sub(sub(sub(sub(average(safe_pow(leaky_relu(logit(triangle_wave(-0.270541)), safe_sqrt(4.01804)), safe_sqrt(x[5])), leaky_relu(logit(triangle_wave(safe_sqrt(x[5]))), x[5])), logit(safe_sqrt(average(sub(sub(sub(triangle_wave(safe_sqrt(x[5])), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(safe_sqrt(average(average(x[3], 4.01804), logit(safe_sqrt(x[5])))))), logit(x[5])), logit(sub(average(safe_pow(x[5], safe_sqrt(x[5])), leaky_relu(logit(max_op(x[1], 1.25251)), x[5])), logit(safe_sqrt(average(x[3], 4.01804))))))))), logit(safe_sqrt(average(sub(sub(logit(triangle_wave(safe_sqrt(x[5]))), logit(safe_sqrt(average(x[3], average(x[3], logit(triangle_wave(-0.270541))))))), logit(x[5])), logit(safe_sqrt(logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5]))))))))))), logit(x[5])), logit(safe_sqrt(average(sub(sub(sub(triangle_wave(-0.270541), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(x[5])), logit(sub(average(safe_pow(x[5], safe_sqrt(x[5])), leaky_relu(logit(triangle_wave(safe_sqrt(x[5]))), x[5])), logit(safe_sqrt(average(x[3], 4.01804))))))))), logit(x[5])), mul(3.73747, x[5]))                              | 75     | 1            | 25            | 12            | 1.1711e+08              |
+| 2       | 4000                        | 200                   | safe_div(mul(sinc(average(average(x[1], x[2]), x[0])), add(x[1], add(add(x[0], x[0]), add(add(average(-0.432716, add(average(average(average(sinc(relu(4.27964)), x[2]), add(sinc(custom_exp(x[1])), add(x[0], x[2]))), add(sinc(custom_exp(x[1])), add(x[0], x[2]))), add(x[0], x[2]))), x[2]), add(x[1], x[0]))))), relu(-0.0525263))         | 1200        | 1             | 15              | 9              | 1.0057e+10                |
+| 3       | 4000              | 200          | sub(add(safe_pow(x[0], 2.43372), swish(add(add(sub(safe_pow(custom_sin(2.43372), -1.63332), custom_tanh(x[2])), triangle_wave(x[0])), triangle_wave(x[0])))), add(add(safe_div(x[2], 4.74487), add(add(add(add(cube(x[1]), x[2]), x[2]), x[2]), -3.41421)), triangle_wave(safe_pow(cube(-4.64482), hard_sigmoid(-3.54927)))))      | 1200  | 1             | 15              | 9              | 0.248057                |
+| 4     | 4000                        | 200                  | add(mul(4.46473, custom_cos(x[1])), safe_sqrt(sub(4.46473, sub(sub(custom_exp(sub(custom_cos(x[1]), -2.64882)), mul(add(custom_cos(cube(2.06853)), sub(sub(custom_cos(x[1]), -2.64882), safe_sqrt(mul(4.46473, custom_cos(x[1]))))), custom_cos(sub(custom_cos(x[1]), -2.64882)))), mul(mul(custom_sin(mul(-0.0575288, add(mul(custom_exp(sub(custom_cos(x[1]), -2.64882)), -0.947974), sub(-2.64882, -2.64882)))), x[0]), custom_cos(custom_cos(custom_cos(sub(custom_cos(x[1]), -2.64882)))))))))                              | 1200     | 1            | 15            | 9            | 0.00445512              |
+| 5     | 4000                                  | 200                  | return relu(-0.402701)                             | 1200           | 1            | 15            | 9            | 5.57281e-18              |
+| 6     | 4000              | 200         | add(x[1], average(average(average(sub(x[1], x[0]), average(x[1], sub(mod(mul(sub(x[1], x[0]), mul(-3.17909, triangle_wave(-2.0035))), sub(x[1], x[0])), x[0]))), mod(x[1], gaussian(-1.87344))), sub(x[1], x[0])))                              | 1200     | 1            | 15            | 9            | 1.13731e-05              |
+| 7     | 4000              | 200         | safe_div(add(safe_sqrt(safe_div(average(-3.01401, x[0]), safe_sqrt(sub(min_op(min_op(x[0], safe_pow(x[0], safe_div(x[1], x[0]))), safe_pow(x[1], safe_div(x[1], x[0]))), x[1])))), 2.01851), custom_exp(sub(elu(sub(mul(x[0], x[1]), safe_div(safe_sqrt(safe_sqrt(x[1])), safe_sqrt(sub(x[0], x[1]))))), mul(x[0], x[1]))))                               | 1200     | 1            | 15            | 9            | 54.4802              |
+| 8     | 2000                        | 100         | mul(sub(sub(sub(sub(sub(average(safe_pow(leaky_relu(logit(triangle_wave(-0.270541)), safe_sqrt(4.01804)), safe_sqrt(x[5])), leaky_relu(logit(triangle_wave(safe_sqrt(x[5]))), x[5])), logit(safe_sqrt(average(sub(sub(sub(triangle_wave(safe_sqrt(x[5])), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(safe_sqrt(average(average(x[3], 4.01804), logit(safe_sqrt(x[5])))))), logit(x[5])), logit(sub(average(safe_pow(x[5], safe_sqrt(x[5])), leaky_relu(logit(max_op(x[1], 1.25251)), x[5])), logit(safe_sqrt(average(x[3], 4.01804))))))))), logit(safe_sqrt(average(sub(sub(logit(triangle_wave(safe_sqrt(x[5]))), logit(safe_sqrt(average(x[3], average(x[3], logit(triangle_wave(-0.270541))))))), logit(x[5])), logit(safe_sqrt(logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5]))))))))))), logit(x[5])), logit(safe_sqrt(average(sub(sub(sub(triangle_wave(-0.270541), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(safe_sqrt(average(max_op(x[1], 1.25251), logit(safe_sqrt(x[5])))))), logit(x[5])), logit(sub(average(safe_pow(x[5], safe_sqrt(x[5])), leaky_relu(logit(triangle_wave(safe_sqrt(x[5]))), x[5])), logit(safe_sqrt(average(x[3], 4.01804))))))))), logit(x[5])), mul(3.73747, x[5]))                            | 600     | 1            | 15            | 9            | 535857              |
 
 
 

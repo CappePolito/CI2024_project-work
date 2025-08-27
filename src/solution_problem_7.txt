@@ -1,0 +1,5 @@
+Best formula: safe_div(add(safe_sqrt(safe_div(average(-3.01401, x0), safe_sqrt(sub(min_op(min_op(x0, safe_pow(x0, safe_div(x1, x0))), safe_pow(x1, safe_div(x1, x0))), x1)))), 2.01851), custom_exp(sub(elu(sub(mul(x0, x1), safe_div(safe_sqrt(safe_sqrt(x1)), safe_sqrt(sub(x0, x1))))), mul(x0, x1))))
+MSE (train): 6087.91
+MSE (validation): 2888.43
+Complexity (nodes): 42
+Final fitness: -54.48309068418469

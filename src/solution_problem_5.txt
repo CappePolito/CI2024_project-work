@@ -1,0 +1,5 @@
+Best formula: relu(-2.4037)
+MSE (train): 5.50538e-16
+MSE (validation): 5.84252e-16
+Complexity (nodes): 2
+Final fitness: 9.999999999999388e-05
